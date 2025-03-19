@@ -8,5 +8,8 @@ pub enum FluidError {
     ServerRejectedToken,
     ServerRejectedCycle,
     ClientNotRegistered,
-    ClientNoPrivateKey
+    ClientNoPrivateKey,
+    PrivateKeySigningFailure,
+    FailedFormingTokenPostRequest,
+    FailedSigningNewKey
 }

@@ -1,10 +1,11 @@
-use std::{cmp::Ordering, fmt::Debug};
+use std::{cmp::Ordering, fmt::Debug, ops::Deref};
 
 use rand::Rng;
 use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
 
 use crate::protocol::{error::FluidError, executor::{FixedByteRepr, ProtocolCtx, TimeObj}};
+
 
 
 pub struct AliveToken<D> {
@@ -47,6 +48,12 @@ pub struct FluidToken<D, T, P> {
 pub struct GenericToken<D> {
     timestamp: D,
     data: [u8; 74]
+}
+
+impl<D> AsRef<[u8]> for GenericToken<D> {
+    fn as_ref(&self) -> &[u8] {
+        &self.data
+    }
 }
 
 impl<D> GenericToken<D> {

@@ -88,9 +88,27 @@ impl AsyncClient<TestTimeStub, TestExecutor, DummyKeyChain, ExampleType, Example
 
 pub struct DummyKeyChain;
 
+
 impl Signature for DummySignature {
-    fn get_sig_bytes(&self) -> &[u8] {
+    fn as_bytes(&self) -> &[u8] {
         &self.underlying
+    }
+}
+
+impl AsRef<[u8]> for DummyPrivate {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+impl AsRef<[u8]> for DummyPublic {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl AsRef<[u8]> for DummySignature {
+    fn as_ref(&self) -> &[u8] {
+        &self.actual
     }
 }
 
@@ -103,12 +121,13 @@ impl PrivateKey<DummySignature, FluidError> for DummyPrivate {
     }
 }
 
+
 impl PublicKey<DummySignature> for DummyPublic {
-    fn as_bytes(&self) -> &[u8] {
-        &self.1
-    }
     fn verify(&self, bytes: &[u8], signature: &DummySignature) -> bool {
         signature.actual == bytes && self.0 == signature.underlying
+    }
+    fn as_bytes(&self) -> &[u8] {
+        &self.1
     }
 }
 
@@ -235,7 +254,7 @@ impl ProtocolCtx<TestTimeStub> for TestExecutor {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{protocol::{config::Configuration, executor::SyncClient}, token::signature::{KeyChain, PrivateKey, PublicKey}};
+    use crate::{protocol::{config::Configuration, executor::{AsyncClient, SyncClient}}, token::signature::{KeyChain, PrivateKey, PublicKey}};
 
     use super::{DummyClientSyncStruct, DummyKeyChain, TestExecutor};
 
@@ -249,24 +268,26 @@ mod tests {
         assert!(!public.verify(&[1, 3], &sig));
     }
 
-    // #[test]
-    // pub fn test_dummy_client_protocol_execution() {
-    //     let mut executor = DummyClientSyncStruct {
-    //         context: TestExecutor {
-    //             configuration: Configuration {
-    //                 stamping_timeout_secs: 10
-    //             },
-    //             internal_clock: 0
-    //         },
-    //         current_token: None,
-    //         faux_server: super::FauxDummyServer { keys: HashMap::new().into() },
-    //         id: None,
-    //         private_key: None
-    //     };
+    
 
-    //     assert!(!executor.is_registered().unwrap());
-    //     let token = executor.get_token(super::ExampleType(0), super::ExampleProtocol(0)).unwrap();
-    //     assert!(executor.is_registered().unwrap());
+    #[tokio::test]
+    pub async fn test_dummy_client_protocol_execution() {
+        let mut executor = DummyClientSyncStruct {
+            context: TestExecutor {
+                configuration: Configuration {
+                    stamping_timeout_secs: 10
+                },
+                internal_clock: 0
+            },
+            current_token: None,
+            faux_server: super::FauxDummyServer { keys: HashMap::new().into() },
+            id: None,
+            private_key: None
+        };
 
-    // }
+        assert!(!executor.is_registered().await.unwrap());
+        let token = executor.get_token(super::ExampleType(0), super::ExampleProtocol(0)).await.unwrap();
+        assert!(executor.is_registered().await.unwrap());
+
+    }
 }
