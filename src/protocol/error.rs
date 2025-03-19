@@ -4,5 +4,9 @@ pub enum FluidError {
     FailedDeserializingId,
     FailedDeserializingPermissions,
     FailedDeserTimestamp,
-    FailedDeserBody
+    FailedDeserBody,
+    ServerRejectedToken,
+    ServerRejectedCycle,
+    ClientNotRegistered,
+    ClientNoPrivateKey
 }

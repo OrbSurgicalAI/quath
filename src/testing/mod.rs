@@ -1,15 +1,139 @@
+use std::{cell::RefCell, collections::HashMap};
+
 use arbitrary::Arbitrary;
+use rand::Rng;
 use uuid::Uuid;
 
 use crate::{
     protocol::{
-        config::Configuration,
-        executor::{FixedByteRepr, ProtocolExecutor, TimeObj},
+        config::Configuration, error::FluidError, executor::{AsyncClient, FixedByteRepr, ProtocolCtx, Response, SyncClient, TimeObj}
     },
-    token::token::FluidToken,
+    token::{signature::{KeyChain, PrivateKey, PublicKey, Signature}, token::{AliveToken, FluidToken, GenericToken}},
 };
 
-#[derive(Arbitrary, PartialEq, Debug)]
+
+
+type DummyToken = AliveToken<TestTimeStub>;
+
+
+pub struct FauxDummyServer {
+    keys: RefCell<HashMap<Uuid, DummyPublic>>
+}
+
+pub struct DummyClientSyncStruct {
+    context: TestExecutor,
+    id: Option<Uuid>,
+    private_key: Option<DummyPrivate>,
+    current_token: Option<DummyToken>,
+
+    faux_server: FauxDummyServer
+
+
+}
+
+
+
+impl AsyncClient<TestTimeStub, TestExecutor, DummyKeyChain, ExampleType, ExampleProtocol> for DummyClientSyncStruct {
+    type Err = FluidError;
+
+    async fn ctx<'a>(&'a self) -> &'a TestExecutor where TestExecutor: 'a {
+        &self.context
+    }
+    async fn register_request(&self, id: Uuid, public: &<DummyKeyChain as KeyChain>::Public) -> Result<Uuid, Self::Err> {
+        self.faux_server.keys.borrow_mut().insert(id, public.clone());
+        Ok(id)
+    }
+    async fn cycle_request(&self, id: Uuid, public: &<DummyKeyChain as KeyChain>::Public, new_sig: &<DummyKeyChain as KeyChain>::Signature, old_sig: &<DummyKeyChain as KeyChain>::Signature) -> Result<bool, Self::Err> {
+        let hook = self.faux_server.keys.borrow();
+        let current = hook.get(&id).unwrap();
+        if current.verify(public.as_bytes(), old_sig) && public.verify(public.as_bytes(), new_sig) {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+
+    }
+    async fn stamp_request(&self, id: Uuid, token: &GenericToken<TestTimeStub>, signature: &<DummyKeyChain as KeyChain>::Signature) -> Result<crate::protocol::executor::Response<TestTimeStub>, Self::Err> {
+        let hook = self.faux_server.keys.borrow();
+        let wow = hook.get(&id).unwrap();
+        if wow.verify(token.get_bytes(), signature) {
+            Ok(Response::Return { token: token.clone(), life: TestTimeStub::from_seconds(60) })
+        } else {
+            Ok(Response::Invalid)
+        }
+    }
+    async fn get_current_token<'a>(&'a self) -> Result<&'a Option<AliveToken<TestTimeStub>>, Self::Err> where TestTimeStub: 'a {
+        Ok(&self.current_token)
+    }
+    async fn set_current_token(&mut self, token: Option<crate::token::token::AliveToken<TestTimeStub>>) -> Result<(), Self::Err> {
+        self.current_token = token;
+        Ok(())
+    }
+    async fn private_key<'a>(&'a self) -> Result<&'a Option<<DummyKeyChain as KeyChain>::Private>, Self::Err> where <DummyKeyChain as KeyChain>::Private: 'a {
+        Ok(&self.private_key)
+    }
+    async fn set_private_key(&mut self, privkey: Option<<DummyKeyChain as KeyChain>::Private>) -> Result<(), Self::Err> {
+        self.private_key = privkey;
+        Ok(())
+    }
+    async fn get_id<'a>(&self) -> Result<Option<Uuid>, Self::Err> where TestExecutor: 'a {
+       Ok(self.id)
+    }
+    async fn set_id(&mut self, id: Option<Uuid>) -> Result<Option<Uuid>, Self::Err> {
+        self.id = id;
+        Ok(id)
+    }
+
+}
+
+pub struct DummyKeyChain;
+
+impl Signature for DummySignature {
+    fn get_sig_bytes(&self) -> &[u8] {
+        &self.underlying
+    }
+}
+
+impl PrivateKey<DummySignature, FluidError> for DummyPrivate {
+    fn sign(&self, bytes: &[u8]) -> Result<DummySignature, FluidError> {
+        Ok(DummySignature {
+            actual: bytes.to_vec(),
+            underlying: self.0.clone()
+        })
+    }
+}
+
+impl PublicKey<DummySignature> for DummyPublic {
+    fn as_bytes(&self) -> &[u8] {
+        &self.1
+    }
+    fn verify(&self, bytes: &[u8], signature: &DummySignature) -> bool {
+        signature.actual == bytes && self.0 == signature.underlying
+    }
+}
+
+impl KeyChain for DummyKeyChain {
+    type Private = DummyPrivate;
+    type Public = DummyPublic;
+    type Signature = DummySignature;
+    type Error = FluidError;
+    fn generate() -> (Self::Public, Self::Private) {
+        let stem: [u8; 8] = rand::rng().random();
+        (DummyPublic(stem.clone(), rand::rng().random()), DummyPrivate(stem))
+    }
+}
+
+pub struct DummyPrivate([u8; 8]);
+
+#[derive(Clone)]
+pub struct DummyPublic([u8; 8], [u8; 4]);
+
+pub struct DummySignature {
+    actual: Vec<u8>,
+    underlying: [u8; 8]
+}
+
+#[derive(Arbitrary, PartialEq, Debug, Clone)]
 pub struct TestTimeStub {
     pub seconds: u64,
 }
@@ -23,7 +147,7 @@ impl TimeObj for TestTimeStub {
     }
 }
 
-#[derive(Arbitrary, PartialEq, Debug)]
+#[derive(Arbitrary, PartialEq, Debug, Clone)]
 pub struct ExampleProtocol(u8);
 
 impl FixedByteRepr<1> for ExampleProtocol {
@@ -35,7 +159,7 @@ impl FixedByteRepr<1> for ExampleProtocol {
     }
 }
 
-#[derive(Arbitrary, PartialEq, Debug)]
+#[derive(Arbitrary, PartialEq, Debug, Clone)]
 pub struct ExampleType(u8);
 
 impl FixedByteRepr<1> for ExampleType {
@@ -95,7 +219,7 @@ pub struct TestExecutor {
     pub configuration: Configuration,
 }
 
-impl ProtocolExecutor<TestTimeStub> for TestExecutor {
+impl ProtocolCtx<TestTimeStub> for TestExecutor {
     fn current_time(&self) -> TestTimeStub {
         TestTimeStub {
             seconds: self.internal_clock,
@@ -104,4 +228,45 @@ impl ProtocolExecutor<TestTimeStub> for TestExecutor {
     fn config(&self) -> &crate::protocol::config::Configuration {
         &self.configuration
     }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::{protocol::{config::Configuration, executor::SyncClient}, token::signature::{KeyChain, PrivateKey, PublicKey}};
+
+    use super::{DummyClientSyncStruct, DummyKeyChain, TestExecutor};
+
+
+    #[test]
+    pub fn test_dummy_sign() {
+        let (public, private) = DummyKeyChain::generate();
+
+        let sig = private.sign(&[1, 2, 3]).unwrap();
+        assert!(public.verify(&[1, 2, 3], &sig));
+        assert!(!public.verify(&[1, 3], &sig));
+    }
+
+    // #[test]
+    // pub fn test_dummy_client_protocol_execution() {
+    //     let mut executor = DummyClientSyncStruct {
+    //         context: TestExecutor {
+    //             configuration: Configuration {
+    //                 stamping_timeout_secs: 10
+    //             },
+    //             internal_clock: 0
+    //         },
+    //         current_token: None,
+    //         faux_server: super::FauxDummyServer { keys: HashMap::new().into() },
+    //         id: None,
+    //         private_key: None
+    //     };
+
+    //     assert!(!executor.is_registered().unwrap());
+    //     let token = executor.get_token(super::ExampleType(0), super::ExampleProtocol(0)).unwrap();
+    //     assert!(executor.is_registered().unwrap());
+
+    // }
 }

@@ -1,14 +1,39 @@
-use std::{cmp::Ordering, fmt::{Arguments, Debug}, time::Duration};
+use std::{cmp::Ordering, fmt::Debug};
 
-use chrono::{DateTime, Utc};
+use rand::Rng;
 use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
 
-use crate::protocol::{error::FluidError, executor::{FixedByteRepr, ProtocolExecutor, TimeObj}};
+use crate::protocol::{error::FluidError, executor::{FixedByteRepr, ProtocolCtx, TimeObj}};
 
 
+pub struct AliveToken<D> {
+    token: GenericToken<D>,
+    life: D
+}
 
 
+impl<D> AliveToken<D> {
+    pub fn from_raw(token: GenericToken<D>, life: D) -> AliveToken<D> {
+        AliveToken { token, life }
+    }
+    pub fn token(&self) -> &GenericToken<D> {
+        &self.token
+    }
+    pub fn life(&self) -> &D {
+        &self.life
+    }
+    
+}
+
+impl<D> AliveToken<D>
+where
+    D: TimeObj
+{
+    pub fn is_alive<C: ProtocolCtx<D>>(&self, ctx: &C) -> bool{
+        self.token.timestamp.seconds() + self.life.seconds() > ctx.current_time().seconds()
+    }
+}
 
 pub struct FluidToken<D, T, P> {
     protocol: P,
@@ -17,6 +42,26 @@ pub struct FluidToken<D, T, P> {
     permissions: [u8; 16],
     timestamp: D,
     body: [u8; 32]
+}
+
+pub struct GenericToken<D> {
+    timestamp: D,
+    data: [u8; 74]
+}
+
+impl<D> GenericToken<D> {
+    pub fn get_bytes(&self) -> &[u8; 74] {
+        &self.data
+    }
+}
+
+impl<D: Clone> Clone for GenericToken<D> {
+    fn clone(&self) -> Self {
+        Self {
+            timestamp: self.timestamp.clone(),
+            data: self.data.clone()
+        }
+    }
 }
 
 
@@ -53,19 +98,11 @@ where
     T: FixedByteRepr<1>,
     P: FixedByteRepr<1>
 {
-    pub fn from_raw(protocol: P, token_type: T, id: Uuid, timestamp: D, body: [u8; 32], permissions: [u8; 16]) -> Self {
-        Self {
-            protocol,
-            token_type,
-            id,
-            timestamp,
-            body,
-            permissions
-
-        }
-    }
     /// Checks if a token can be stamped.
-    pub fn is_stampable<E: ProtocolExecutor<D>>(&self, executor: &E) -> bool {
+    pub fn is_stampable<E>(&self, executor: &E) -> bool
+    where 
+        E: ProtocolCtx<D>
+    {
         let ts = self.timestamp.seconds();
         let es = executor.current_time().seconds();
         let pad = executor.config().timeout();
@@ -79,6 +116,40 @@ where
         } else {
             true
         }
+    }
+}
+
+impl<D, T, P> FluidToken<D, T, P>
+{
+    pub fn from_raw(protocol: P, token_type: T, id: Uuid, timestamp: D, body: [u8; 32], permissions: [u8; 16]) -> Self {
+        Self {
+            protocol,
+            token_type,
+            id,
+            timestamp,
+            body,
+            permissions
+
+        }
+    }
+    pub fn generate<C: ProtocolCtx<D>>(context: &C, id: Uuid, token_type: T, protocol: P) -> FluidToken<D, T, P> {
+        Self::from_raw(protocol, token_type, id, context.current_time(), rand::rng().random(), [0u8; 16])
+    }
+    pub fn get_id(&self) -> Uuid {
+        self.id
+    }
+    
+}
+
+impl<D, T, P> FluidToken<D, T, P>
+where 
+    D: FixedByteRepr<8>,
+    T: FixedByteRepr<1>,
+    P: FixedByteRepr<1>
+{
+    pub fn generic(self) -> GenericToken<D> {
+        let data = self.to_bytes();
+        GenericToken { timestamp: self.timestamp, data }
     }
     pub fn to_bytes(&self) -> [u8; 74] {
         let mut buffer = [0u8; 74];
@@ -129,9 +200,8 @@ where
 mod tests {
     use arbitrary::Arbitrary;
     use sha3::{Digest, Sha3_256};
-    use uuid::Uuid;
 
-    use crate::{protocol::{config::Configuration, executor::{FixedByteRepr, ProtocolExecutor, TimeObj}}, testing::{make_testing_token, ExampleProtocol, ExampleType, TestExecutor, TestTimeStub}};
+    use crate::{protocol::config::Configuration, testing::{make_testing_token, ExampleProtocol, ExampleType, TestExecutor, TestTimeStub}};
 
     use super::FluidToken;
 
