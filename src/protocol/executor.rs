@@ -23,7 +23,7 @@ use super::{
     config::Configuration,
     error::FluidError,
     web::{
-        body::FullResponse, http::form_cycle_request, payload::{CycleRequest, PostTokenResponse, TokenStampRequest}
+        body::FullResponse, container::rfc3339::Rfc3339, http::form_cycle_request, payload::{CycleRequest, PostTokenResponse, TokenStampRequest}
     },
 };
 use serde::{Deserialize, Serialize};
@@ -116,7 +116,7 @@ impl Connection {
 
 impl<D, KC> ClientProtocol<D, KC>
 where
-    D: TimeObj + FixedByteRepr<8> + for<'de> Deserialize<'de>,
+    D: TimeObj + FixedByteRepr<8> + Rfc3339,
     KC: KeyChain,
 {
     pub fn new() -> Self {
@@ -203,7 +203,7 @@ where
 
         Ok(())
     }
-    pub fn handle_input<T, P>(&mut self, response: FullResponse) -> Result<(), FluidError> {
+    pub fn handle_input(&mut self, response: FullResponse) -> Result<(), FluidError> {
         match self.state.take().unwrap() {
             ClientState::Idle => panic!("Client handled input while in idle."),
             ClientState::Registered => panic!("Client handled input while in registered."),
@@ -322,7 +322,7 @@ where
 /// Parse the stamp response into a usable set of data.
 fn parse_stamp_response<D>(raw: FullResponse) -> Result<ExecResponse<D>, FluidError>
 where
-    D: for<'de> Deserialize<'de>,
+    D: Rfc3339
 {
     if raw.status() == StatusCode::RESET_CONTENT {
         // Needs a cycle.
@@ -332,7 +332,7 @@ where
         let ptr: PostTokenResponse<D> = raw
             .parse_json()
             .map_err(|e| FluidError::FailedDeserializingPtr(e))?;
-        Ok(ExecResponse::Return { expiry: ptr.expiry })
+        Ok(ExecResponse::Return { expiry: ptr.expiry.inner() })
     } else {
         Ok(ExecResponse::Invalid(raw.status()))
     }
@@ -369,8 +369,8 @@ mod tests {
         protocol::{
             config::Configuration,
             error::FluidError,
-            executor::{ClientState, Connection, Hello, form_token_post},
-            http::NetworkClient,
+            executor::{form_token_post, ClientState, Connection, ExecResponse, Hello, TimeObj},
+            http::NetworkClient, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict},
         },
         testing::{
             DummyClientSyncStruct, DummyKeyChain, ExampleProtocol, ExampleType, TestExecutor,
@@ -388,6 +388,8 @@ mod tests {
         executor.generate();
         
         // We will assume this is registered here (to test correct flow)
+        // AND that this is not their first time exchanging with the server
+        // so that the key cycle is not triggred.
         executor.state = Some(ClientState::Registered);
 
         let contex = TestExecutor::generic();
@@ -407,12 +409,29 @@ mod tests {
         let _ = executor.get_transmit().as_ref().unwrap();
 
         // We will emulate the server approving this.
+        let success = form_post_token_response(TokenVerdict::Success { 
+            expiry: TestTimeStub::from_millis_since_epoch(100)
+        }).unwrap();
+
+        // Handle this input.
+        executor.handle_input(FullResponse::from_raw(success)).unwrap();
+
+        
+        // Verify the state is correct.
+        if let ClientState::ReceivedStampResponse { decision, .. } = executor.state.as_ref().unwrap() {
+            if let ExecResponse::Return { .. } = decision {} else {
+                panic!("Should have received a return but did not.");
+            }
+        } else {
+            panic!("After receiving the response the client should be in the receiving state but they are not.");
+        }
         
 
+        // Advance the state machine
+        let partway = executor.poll_token(&contex, ExampleType(0)).unwrap();
+        assert!(partway.is_ready());
 
-        
-        
-
+        // Execution is complete!
 
     }
 

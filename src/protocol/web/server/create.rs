@@ -1,27 +1,22 @@
 use http::StatusCode;
+use uuid::Uuid;
 
 use crate::protocol::web::{container::rfc3339::{Rfc3339, Rfc3339Container}, payload::PostTokenResponse};
 
 use super::verdict::Verdict;
-pub enum TokenVerdict<'a, D> {
-    /// The token may be valid, however the key itself must
-    /// be cycled before this request can be handled.
-    NeedsCycle,
-    /// The protocol requested is simply not supported by the server.
-    NotImplemented(&'a str),
-    /// The protocol requested is not in line with what the client was registered with.
-    ProtocolMismatch { actual: String },
-    /// The timestamp is invalid.
-    TimestampInvalid,
-    /// The token had a bad format and thus could not be read by the server.
-    BadTokenFormat,
-    /// The server had an internal error that prevented it from completing the request,
-    /// and the client should retry.
+pub enum RegisterVerdict<'a> {
+
+    /// To no fault of the client, the server has failed processing this
+    /// request and it must be resubmitted.
     InternalServerError,
-    /// The token was succesfully created.
-    Success { expiry: D },
-    /// There is already a token that exists with this identity
-    Conflict 
+    /// The server could not read the key
+    KeyProcessError,
+    /// The requested protocol is not supported.
+    NotImplemented(&'a str),
+    /// There is already a service entity that exists with this identity
+    Conflict {
+        conflicting_id: Uuid
+    }
 }
 
 

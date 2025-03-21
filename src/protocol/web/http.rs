@@ -6,13 +6,13 @@ use uuid::Uuid;
 
 use crate::{protocol::{error::FluidError, executor::Connection}, token::{signature::{B64Owned, B64Ref, KeyChain, PrivateKey, PublicKey}, token::GenericToken}};
 
-use super::{payload::{CycleRequest, PostTokenResponse, TokenStampRequest}, server::{cycle::CycleVerdict, token::TokenVerdict}};
+use super::{container::rfc3339::Rfc3339, payload::{CycleRequest, PostTokenResponse, TokenStampRequest}, server::{cycle::CycleVerdict, token::TokenVerdict, verdict::Verdict}};
 
 pub(crate) fn form_post_token_response<D>(verdict: TokenVerdict<'_, D>) -> Result<Response<String>, FluidError>
 where 
-    D: Serialize
+    D: Rfc3339
 {
-    let verdict = verdict.get_message();
+    let verdict: Verdict<PostTokenResponse<D>> = verdict.into();
     let code = verdict.code();
 
     Response::builder()
@@ -22,21 +22,14 @@ where
 }
 
 
-pub(crate) fn form_cycle_response(verdict: CycleVerdict<'_>) -> Result<Response<String>, http::Error> {
-    match verdict {
-        CycleVerdict::Success => Response::builder()
-            .status(StatusCode::OK)
-            .body(String::new()),
-        CycleVerdict::InternalServerError => Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body("Server failed to process the request. Please retry.".to_string()),
-        CycleVerdict::NotImplemented(protocol) => Response::builder()
-            .status(StatusCode::NOT_IMPLEMENTED)
-            .body(format!("The server does not support protocol \"{protocol}\".")),
-        CycleVerdict::Unauthorized => Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .body(format!("The signed public key that was proposed was not signed by the currently active private key."))
-    }
+pub(crate) fn form_cycle_response(verdict: CycleVerdict<'_>) -> Result<Response<String>, FluidError> {
+    let verdict: Verdict<()> = verdict.into();
+    let code = verdict.code();
+
+    Response::builder()
+        .status(code)
+        .header(CONTENT_TYPE, "application/json")
+        .body(verdict.to_json_string().or(Err(FluidError::SerdeError))?).or(Err(FluidError::FailedFormingCycleResponse))
 }
 
 /// Forms a cycle request as an HTTP reequest.

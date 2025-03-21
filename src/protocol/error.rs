@@ -32,5 +32,7 @@ pub enum FluidError {
     #[error("Failed to create the cycling request")]
     FailedSerializingCycleRequest,
     #[error("The server has failed to form a token post response")]
-    FailedFormingTokenPostResponse
+    FailedFormingTokenPostResponse,
+    #[error("The server has failed to form a cycle response")]
+    FailedFormingCycleResponse
 }

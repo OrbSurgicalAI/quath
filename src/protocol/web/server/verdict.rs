@@ -20,23 +20,33 @@ struct CustomVerdictPayload<'a> {
     message: &'a str
 }
 
-pub(crate) fn format_verdict<B, O>(name: &str, code: StatusCode,  message: B) -> Verdict<O>
+fn format_verdict<B, O>(name: &str, code: StatusCode,  message: B) -> Verdict<O>
 where 
     B: AsRef<str>
 {
     Verdict::Custom { name: name.to_string(), code, response: message.as_ref().to_string() }
 }
 
-impl<O> Verdict<O>
-where 
-    O: Serialize
-{
+impl<O> Verdict<O> {
+    pub fn custom<B>(name: &str, code: StatusCode, message: B) -> Self
+    where 
+        B: AsRef<str>
+    {
+        format_verdict(name, code, message)
+    }
     pub fn code(&self) -> StatusCode {
         match self {
             Self::Result { code, .. } => *code,
             Self::Custom { code, .. } => *code
         }
     }
+}
+
+impl<O> Verdict<O>
+where 
+    O: Serialize
+{
+    
     pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
         match self {
             Self::Custom { name, code:_, response } => serde_json::to_string(&CustomVerdictPayload {

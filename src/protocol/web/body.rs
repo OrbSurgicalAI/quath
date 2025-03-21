@@ -1,4 +1,4 @@
-use http::{response::Parts, StatusCode};
+use http::{response::Parts, Response, StatusCode};
 use hyper::body::Bytes;
 use serde::Deserialize;
 
@@ -18,6 +18,14 @@ impl FullResponse {
     }
     pub fn bytes(&self) -> &Bytes {
         &self.received
+    }
+    pub fn from_raw<O>(resp: Response<O>) -> FullResponse
+    where 
+        O: AsRef<[u8]> + Send + 'static
+    {
+        let (parts, body) = resp.into_parts();
+        FullResponse { parts, received: Bytes::from_owner(body) }
+
     }
     pub fn parse_json<O>(&self) -> Result<O, serde_json::Error>
     where 

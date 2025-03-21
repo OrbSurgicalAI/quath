@@ -1,6 +1,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use arbitrary::Arbitrary;
+use chrono::DateTime;
 use http::Uri;
 use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -8,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     protocol::{
-        config::Configuration, error::FluidError, executor::{Connection, ExecResponse, FixedByteRepr, ProtocolCtx, TimeObj}
+        config::Configuration, error::FluidError, executor::{Connection, ExecResponse, FixedByteRepr, ProtocolCtx, TimeObj}, web::container::rfc3339::{Rfc3339, Rfc3339Str}
     },
     token::{signature::{KeyChain, PrivateKey, PublicKey, Signature}, token::{AliveToken, FluidToken, GenericToken}},
 };
@@ -116,6 +117,16 @@ impl DummySignature {
 #[derive(Arbitrary, PartialEq, Debug, Clone, Deserialize)]
 pub struct TestTimeStub {
     pub seconds: i64,
+}
+
+impl Rfc3339 for TestTimeStub {
+    type Error = chrono::ParseError;
+    fn parse_from_rfc3339(candidate: &str) -> Result<Self, Self::Error> {
+        Ok(Self { seconds: DateTime::parse_from_rfc3339(candidate)?.timestamp_millis() })
+    }
+    fn to_rfc3339(&self) -> crate::protocol::web::container::rfc3339::Rfc3339Str {
+        Rfc3339Str::from_str(&DateTime::from_timestamp_millis(self.seconds).unwrap().to_rfc3339()).unwrap()
+    }
 }
 
 impl TimeObj for TestTimeStub {

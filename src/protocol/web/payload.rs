@@ -3,6 +3,8 @@ use uuid::Uuid;
 
 use crate::token::{signature::{B64Owned, B64Ref, KeyChain}, token::GenericToken};
 
+use super::container::rfc3339::{Rfc3339, Rfc3339Container, Rfc3339Str};
+
 
 pub struct CycleRequest<'a, P, M, KC>
 where
@@ -61,11 +63,16 @@ where
 }
 
 
+
 #[derive(Deserialize, Serialize)]
 pub struct PostTokenResponse<D>
 {
-    pub expiry: D
+    #[serde(bound(deserialize = "D: Rfc3339"))]
+    #[serde(bound(serialize = "D: Rfc3339"))]
+    pub expiry: Rfc3339Container<D>
 }
+
+
 
 #[cfg(test)]
 mod tests {
