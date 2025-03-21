@@ -32,6 +32,13 @@ where
     pub metadata: &'a Option<M>,
 }
 
+#[derive(Serialize)]
+pub struct DeleteSvcEntityRequest
+{
+    pub id: Uuid
+}
+
+
 impl<'a, P, M, KC> Serialize for CycleRequest<'a, P, M, KC>
 where 
     P: Serialize,

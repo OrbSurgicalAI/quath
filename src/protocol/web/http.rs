@@ -1,6 +1,5 @@
 use http::{
-    Method, Request, Response, StatusCode,
-    header::{self, CONTENT_TYPE},
+    header::{self, AUTHORIZATION, CONTENT_TYPE}, HeaderValue, Method, Request, Response, StatusCode
 };
 use http_body_util::Empty;
 use hyper::body::Bytes;
@@ -20,8 +19,8 @@ use super::{
         b64::{B64Owned, B64Ref},
         rfc3339::Rfc3339,
     },
-    payload::{CreateServiceEntityRequest, CycleRequest, PostTokenResponse, TokenStampRequest},
-    server::{create::RegisterVerdict, cycle::CycleVerdict, token::TokenVerdict, verdict::Verdict},
+    payload::{CreateServiceEntityRequest, CycleRequest, DeleteSvcEntityRequest, PostTokenResponse, TokenStampRequest},
+    server::{create::RegisterVerdict, cycle::CycleVerdict, delete::DeletionVerdict, token::TokenVerdict, verdict::Verdict},
 };
 
 pub(crate) fn form_post_token_response<D>(
@@ -66,6 +65,19 @@ pub(crate) fn form_register_response(
         .or(Err(FluidError::FailedFormingRegisterResponse))
 }
 
+pub(crate) fn form_deletion_response(
+    verdict: DeletionVerdict,
+) -> Result<Response<String>, FluidError> {
+    let verdict: Verdict<()> = verdict.into();
+    let code = verdict.code();
+
+    Response::builder()
+        .status(code)
+        .header(CONTENT_TYPE, "application/json")
+        .body(verdict.to_json_string().or(Err(FluidError::SerdeError))?)
+        .or(Err(FluidError::FailedFormingDeletionResponse))
+}
+
 /// Forms a cycle request as an HTTP reequest.
 ///
 /// This will automatically perform the necessary
@@ -87,7 +99,7 @@ where
         .or(Err(FluidError::FailedSigningNewKey))?;
 
     hyper::Request::builder()
-        .method(Method::PUT)
+        .method(Method::PATCH)
         .uri(conn.uri())
         .header(header::CONTENT_TYPE, "application/json")
         .body(CycleRequest {
@@ -121,6 +133,23 @@ where
 }
 
 
+
+pub(crate) fn form_service_entity_deletion_request(
+    conn: &Connection,
+    id: Uuid,
+    authorization: HeaderValue
+) -> Result<Request<DeleteSvcEntityRequest>, FluidError>
+{
+    hyper::Request::builder()
+        .method(hyper::Method::DELETE)
+        .uri(conn.uri())
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(AUTHORIZATION, authorization)
+        .body(DeleteSvcEntityRequest {
+            id
+        })
+        .or(Err(FluidError::FailedFormingDeletionResponse))
+}
 
 /// Forms a token posting request.
 pub(crate) fn form_service_entity_create_request<'a, KC, P, M>(

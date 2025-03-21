@@ -37,10 +37,16 @@ pub enum FluidError {
     FailedFormingEntityCreationRequest,
     #[error("The server has failed to form a regiser response")]
     FailedFormingRegisterResponse,
+    #[error("The server has failed to form a delete response")]
+    FailedFormingDeletionResponse,
     #[error("The server has failed to form a cycle response")]
     FailedFormingCycleResponse,
     #[error("The response to the service entity creation requested was malformed.")]
     CreationResponseMalformed,
     #[error("Registration Failure")]
-    RegistrationFailed(String)
+    RegistrationFailed(String),
+    #[error("Deletion Failure")]
+    DeletionFailed(String),
+    #[error("Failed")]
+    FailedDeserializingDeletionResponse
 }
