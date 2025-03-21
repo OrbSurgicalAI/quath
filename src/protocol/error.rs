@@ -30,5 +30,7 @@ pub enum FluidError {
     #[error("Failed to deserialzie the post token response")]
     FailedDeserializingPtr(serde_json::Error),
     #[error("Failed to create the cycling request")]
-    FailedSerializingCycleRequest
+    FailedSerializingCycleRequest,
+    #[error("The server has failed to form a token post response")]
+    FailedFormingTokenPostResponse
 }

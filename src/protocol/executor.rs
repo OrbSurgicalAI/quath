@@ -11,7 +11,7 @@ use hyper::{
 use uuid::Uuid;
 
 use crate::{
-    protocol::http::prep_request,
+    protocol::{http::prep_request, web::http::form_token_post},
     token::{
         self,
         signature::{B64Owned, B64Ref, KeyChain, PrivateKey, PublicKey, Signature},
@@ -23,8 +23,7 @@ use super::{
     config::Configuration,
     error::FluidError,
     web::{
-        body::FullResponse,
-        payload::{CycleRequest, PostTokenResponse, TokenStampRequest},
+        body::FullResponse, http::form_cycle_request, payload::{CycleRequest, PostTokenResponse, TokenStampRequest}
     },
 };
 use serde::{Deserialize, Serialize};
@@ -82,6 +81,8 @@ where
     }
 }
 
+
+
 type Container<D> = Option<D>;
 pub struct ClientProtocol<D, KC>
 where
@@ -101,6 +102,9 @@ pub struct Connection {
 impl Connection {
     pub fn from_uri(uri: Uri) -> Self {
         Self { uri }
+    }
+    pub fn uri(&self) -> &Uri {
+        &self.uri
     }
 }
 
@@ -123,6 +127,14 @@ where
             state: Container::Some(ClientState::Idle),
             transmit: vec![],
         }
+    }
+    /// Installs a new keychain to the client, recall
+    /// that this does not naturally register the client.
+    pub fn generate(&mut self) {
+        let (_, private) = KC::generate();
+        self.private_key = Some(private);
+        self.id = Some(Uuid::new_v4());
+        
     }
     /// Checks and sees if the client is already registered.
     pub fn is_registered(&self) -> bool {
@@ -162,7 +174,9 @@ where
 
         Ok((token.generic(), signature))
     }
-
+    pub fn get_transmit(&mut self) -> Option<Request<Full<Bytes>>> {
+        self.transmit.pop()
+    }
     /// This formulates and sends a new token request.
     /// 
     /// This will also drive us into the sending token state.
@@ -184,6 +198,8 @@ where
 
         // Enqueue this request.
         self.transmit.push(serialized);
+
+        self.state = Some(ClientState::SendingToken { outstanding: token });
 
         Ok(())
     }
@@ -322,59 +338,6 @@ where
     }
 }
 
-/// Forms a cycle request as an HTTP reequest.
-///
-/// This will automatically perform the necessary
-/// signing to generate a valid request.
-fn form_cycle_request<'a, D, P, KC: KeyChain, M>(
-    conn: &'a Connection,
-    protocol: &'a P,
-    id: Uuid,
-    new_public: &'a KC::Public,
-    old_private: &'a KC::Private,
-    metadata: &'a Option<M>,
-) -> Result<Request<CycleRequest<'a, P, M, KC>>, FluidError>
-where
-    P: Serialize,
-    M: Serialize,
-{
-    let signature = old_private
-        .sign(new_public.as_bytes())
-        .or(Err(FluidError::FailedSigningNewKey))?;
-
-    hyper::Request::builder()
-        .method(Method::PUT)
-        .uri(&conn.uri)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(CycleRequest {
-            id,
-            protocol,
-            key: B64Ref(new_public),
-            signature: B64Owned(signature),
-            metadata,
-        })
-        .or(Err(FluidError::FailedFormingTokenPostRequest))
-}
-
-/// Forms a token posting request.
-fn form_token_post<'a, D, KC>(
-    conn: &'a Connection,
-    token: &'a GenericToken<D>,
-    signature: &'a KC::Signature,
-) -> Result<Request<TokenStampRequest<'a, D, KC>>, FluidError>
-where
-    KC: KeyChain,
-{
-    hyper::Request::builder()
-        .method(hyper::Method::PUT)
-        .uri(&conn.uri)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(TokenStampRequest {
-            token: B64Ref(token),
-            signature: B64Ref(signature),
-        })
-        .or(Err(FluidError::FailedFormingTokenPostRequest))
-}
 
 
 pub enum ExecResponse<D> {
@@ -419,7 +382,42 @@ mod tests {
     use super::{ClientProtocol, ProtocolCtx};
 
     #[test]
-    pub fn test_token_request_transitions() {
+    pub fn test_correct_workflow_registered() {
+        /* This test runs what should be a fully correct workflow! */
+        let mut executor = ClientProtocol::<TestTimeStub, DummyKeyChain>::new();
+        executor.generate();
+        
+        // We will assume this is registered here (to test correct flow)
+        executor.state = Some(ClientState::Registered);
+
+        let contex = TestExecutor::generic();
+
+
+        // This should trigger a token request.
+        let initial = executor.poll_token(&contex, ExampleType(0)).unwrap();
+        assert!(initial.is_pending());
+
+        // We should be in the sending token state.
+        if let ClientState::SendingToken { .. } = executor.state.as_ref().unwrap() {} else {
+            panic!("The client was not in the sending token state after being polled!");
+        }
+        
+        // There should be an item in the queue.
+        assert_eq!(executor.transmit.len(), 1);
+        let _ = executor.get_transmit().as_ref().unwrap();
+
+        // We will emulate the server approving this.
+        
+
+
+        
+        
+
+
+    }
+
+    #[test]
+    pub fn test_token_poll_not_registered() {
         let mut executor = ClientProtocol::<TestTimeStub, DummyKeyChain>::new();
 
         let context = TestExecutor::generic();

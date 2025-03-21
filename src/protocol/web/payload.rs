@@ -61,7 +61,7 @@ where
 }
 
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct PostTokenResponse<D>
 {
     pub expiry: D
