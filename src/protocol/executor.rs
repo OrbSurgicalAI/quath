@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, marker::PhantomData, task::Poll};
+use std::{cmp::Ordering, marker::PhantomData, task::Poll, time::Duration};
 
 use base64::{Engine, prelude::BASE64_URL_SAFE};
 use chrono::{DateTime, Utc};
@@ -11,7 +11,7 @@ use hyper::{
 use uuid::Uuid;
 
 use crate::{
-    protocol::{http::prep_request, web::http::form_token_post},
+    protocol::{http::prep_request, web::http::form_token_put},
     token::{
         signature::{KeyChain, PrivateKey},
         token::{AliveToken, FluidToken, GenericToken},
@@ -36,6 +36,7 @@ pub trait ProtocolCtx<D> {
     fn config(&self) -> &Configuration;
     fn connection(&self) -> &Connection;
     fn protocol(&self) -> Self::Protocol;
+    fn retry_cooldown(&self) -> Duration;
 }
 
 pub trait TimeObj {
@@ -193,7 +194,7 @@ where
         // We should be in the registered state when sending this out.
         assert!(matches!(self.state.as_ref().unwrap(), ClientState::Registered));
         let (token, signature) = self.gen_token_and_sign(ctx, token_type)?;
-        let form = form_token_post::<D, KC>(ctx.connection(), &token, &signature)?;
+        let form = form_token_put::<D, KC>(ctx.connection(), &token, &signature)?;
         let serialized = prep_request(form).or(Err(FluidError::SerdeError))?;
 
         // Enqueue this request.
@@ -375,7 +376,7 @@ mod tests {
         protocol::{
             config::Configuration,
             error::FluidError,
-            executor::{form_token_post, ClientState, Connection, ExecResponse, Hello, TimeObj},
+            executor::{form_token_put, ClientState, Connection, ExecResponse, Hello, TimeObj},
             http::NetworkClient, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict},
         },
         testing::{

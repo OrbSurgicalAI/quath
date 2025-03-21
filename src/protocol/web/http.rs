@@ -20,8 +20,8 @@ use super::{
         b64::{B64Owned, B64Ref},
         rfc3339::Rfc3339,
     },
-    payload::{CycleRequest, PostTokenResponse, TokenStampRequest},
-    server::{cycle::CycleVerdict, token::TokenVerdict, verdict::Verdict},
+    payload::{CreateServiceEntityRequest, CycleRequest, PostTokenResponse, TokenStampRequest},
+    server::{create::RegisterVerdict, cycle::CycleVerdict, token::TokenVerdict, verdict::Verdict},
 };
 
 pub(crate) fn form_post_token_response<D>(
@@ -51,6 +51,19 @@ pub(crate) fn form_cycle_response(
         .header(CONTENT_TYPE, "application/json")
         .body(verdict.to_json_string().or(Err(FluidError::SerdeError))?)
         .or(Err(FluidError::FailedFormingCycleResponse))
+}
+
+pub(crate) fn form_register_response(
+    verdict: RegisterVerdict,
+) -> Result<Response<String>, FluidError> {
+    let verdict: Verdict<()> = verdict.into();
+    let code = verdict.code();
+
+    Response::builder()
+        .status(code)
+        .header(CONTENT_TYPE, "application/json")
+        .body(verdict.to_json_string().or(Err(FluidError::SerdeError))?)
+        .or(Err(FluidError::FailedFormingRegisterResponse))
 }
 
 /// Forms a cycle request as an HTTP reequest.
@@ -88,7 +101,7 @@ where
 }
 
 /// Forms a token posting request.
-pub(crate) fn form_token_post<'a, D, KC>(
+pub(crate) fn form_token_put<'a, D, KC>(
     conn: &'a Connection,
     token: &'a GenericToken<D>,
     signature: &'a KC::Signature,
@@ -105,4 +118,32 @@ where
             signature: B64Ref(signature),
         })
         .or(Err(FluidError::FailedFormingTokenPostRequest))
+}
+
+
+
+/// Forms a token posting request.
+pub(crate) fn form_service_entity_create_request<'a, KC, P, M>(
+    conn: &'a Connection,
+    id: Uuid,
+    protocol: &'a P,
+    key: &'a KC::Public,
+    metadata: &'a Option<M>
+) -> Result<Request<CreateServiceEntityRequest<'a, P, M, KC>>, FluidError>
+where
+    KC: KeyChain,
+    M: Serialize,
+    P: Serialize
+{
+    hyper::Request::builder()
+        .method(hyper::Method::POST)
+        .uri(conn.uri())
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(CreateServiceEntityRequest {
+            id,
+            key: B64Ref(key),
+            metadata,
+            protocol
+        })
+        .or(Err(FluidError::FailedFormingEntityCreationRequest))
 }

@@ -28,6 +28,9 @@ where
 }
 
 impl<O> Verdict<O> {
+    pub fn unauthorized() -> Self {
+        Self::custom("Unauthorized", StatusCode::UNAUTHORIZED, "The requesting entity does not have sufficient permissions to obtain this resource.")
+    }
     pub fn internal_server_error() -> Self {
         Self::custom("InternalServerError", StatusCode::INTERNAL_SERVER_ERROR, "The server failed to process the request because of some internal error, please try again.")
     }

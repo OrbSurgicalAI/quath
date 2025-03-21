@@ -33,6 +33,14 @@ pub enum FluidError {
     FailedSerializingCycleRequest,
     #[error("The server has failed to form a token post response")]
     FailedFormingTokenPostResponse,
+    #[error("The server has failed to form a entity creation request")]
+    FailedFormingEntityCreationRequest,
+    #[error("The server has failed to form a regiser response")]
+    FailedFormingRegisterResponse,
     #[error("The server has failed to form a cycle response")]
-    FailedFormingCycleResponse
+    FailedFormingCycleResponse,
+    #[error("The response to the service entity creation requested was malformed.")]
+    CreationResponseMalformed,
+    #[error("Registration Failure")]
+    RegistrationFailed(String)
 }

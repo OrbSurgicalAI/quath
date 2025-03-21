@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 use arbitrary::Arbitrary;
 use chrono::DateTime;
@@ -237,6 +237,9 @@ impl ProtocolCtx<TestTimeStub> for TestExecutor {
     }
     fn protocol(&self) -> ExampleProtocol {
         self.protocol.clone()
+    }
+    fn retry_cooldown(&self) -> std::time::Duration {
+        Duration::from_secs(30)
     }
 }
 

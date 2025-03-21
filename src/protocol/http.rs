@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 
 use thiserror::Error;
 
-use super::error::FluidError;
 
 pub(crate) struct NetworkClient {
     client: Client<HttpsConnector<HttpConnector>, Full<Bytes>>,

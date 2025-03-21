@@ -19,6 +19,19 @@ where
     pub metadata: &'a Option<M>,
 }
 
+#[derive(Serialize)]
+pub struct CreateServiceEntityRequest<'a, P, M, KC>
+where
+    P: Serialize,
+    M: Serialize,
+    KC: KeyChain,
+{
+    pub id: Uuid,
+    pub protocol: &'a P,
+    pub key: B64Ref<'a, KC::Public>,
+    pub metadata: &'a Option<M>,
+}
+
 impl<'a, P, M, KC> Serialize for CycleRequest<'a, P, M, KC>
 where 
     P: Serialize,
