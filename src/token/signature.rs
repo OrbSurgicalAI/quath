@@ -99,6 +99,8 @@ pub trait Signature: AsRef<[u8]> {
     fn as_bytes(&self) -> &[u8];
 }
 
+
+
 pub trait KeyChain {
     type Private: PrivateKey<Self::Signature, Self::Error>;
     type Public: PublicKey<Self::Signature>;

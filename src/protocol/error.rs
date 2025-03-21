@@ -11,5 +11,6 @@ pub enum FluidError {
     ClientNoPrivateKey,
     PrivateKeySigningFailure,
     FailedFormingTokenPostRequest,
-    FailedSigningNewKey
+    FailedSigningNewKey,
+    SerdeError
 }

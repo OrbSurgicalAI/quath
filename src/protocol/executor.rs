@@ -1,14 +1,15 @@
-use std::{cmp::Ordering, marker::PhantomData};
+use std::{cmp::Ordering, marker::PhantomData, task::Poll};
 
 use base64::{Engine, prelude::BASE64_URL_SAFE};
-use hyper::{Error, Method, Request, Uri, body::Body, header};
+use http_body_util::Full;
+use hyper::{body::{Body, Bytes}, header, Error, Method, Request, Uri};
 use uuid::Uuid;
 
-use crate::token::{
+use crate::{protocol::http::prep_request, token::{
     self,
     signature::{B64Owned, B64Ref, KeyChain, PrivateKey, PublicKey, Signature},
     token::{AliveToken, FluidToken, GenericToken},
-};
+}};
 
 use super::{config::Configuration, error::FluidError, web::payload::{CycleRequest, TokenStampRequest}};
 use serde::Serialize;
@@ -423,6 +424,12 @@ where
 
 pub struct Registered;
 
+enum ClientState {
+    Idle,
+    Registered,
+    SendingToken
+}
+
 pub struct ClientProtocol<D, KC, CTX>
 where
     KC: KeyChain,
@@ -433,6 +440,8 @@ where
     private_key: Option<KC::Private>,
     active_token: Option<AliveToken<D>>,
     context: CTX,
+    state: ClientState,
+    transmit: Vec<Request<Full<Bytes>>>
 }
 
 pub struct Connection {
@@ -454,7 +463,7 @@ where
     CTX: ProtocolCtx<D>,
 {
     /// Checks and sees if the client is already registered.
-    pub async fn is_registered(&self) -> bool {
+    pub fn is_registered(&self) -> bool {
         self.active_token.is_some() && self.id.is_some()
     }
     /// Checks if the current token is valid.
@@ -468,7 +477,7 @@ where
     /// Generates a specialized token and then proceeds to sign it. This
     /// process will convert the special token into a generic one.
     fn gen_token_and_sign<T, P>(
-        &self,
+        &mut self,
         token_type: T,
         token_protocol: P,
     ) -> Result<(GenericToken<D>, KC::Signature), FluidError>
@@ -492,7 +501,7 @@ where
         Ok((token.generic(), signature))
     }
     /// Performs a token refresh.
-    async fn refresh_token<T, P>(&self, token_type: T, token_protocol: P) -> Result<(), FluidError>
+    fn refresh_token<T, P>(&mut self, conn: &Connection, token_type: T, token_protocol: P) -> Result<(), FluidError>
     where
         T: FixedByteRepr<1>,
         P: FixedByteRepr<1>,
@@ -504,26 +513,56 @@ where
 
         Ok(())
     }
+
+    /// This formulates and sends a new token request.
+    fn new_tok_req<T, P>(&mut self, conn: &Connection, token_type: T, token_protocol: P) -> Result<(), FluidError>
+    where 
+        T: FixedByteRepr<1>,
+        P: FixedByteRepr<1>
+    {
+        // We should be in the registered state when sending this out.
+        assert!(matches!(self.state, ClientState::Registered));
+        let (token, signature) = self.gen_token_and_sign(token_type, token_protocol)?;
+        let form = form_token_post::<D, KC>(&self.connection, &token, &signature)?;
+        let serialized = prep_request(form).or(Err(FluidError::SerdeError))?;
+
+
+        Ok(())
+
+    }
     /// Gets the authorization token from the client.
-    pub async fn get_token<T, P>(
-        &self,
+    pub fn get_token<T, P>(
+        &mut self,
+        conn: &Connection,
         token_type: T,
         token_protocol: P,
-    ) -> Result<&GenericToken<D>, FluidError>
+    ) -> Result<Poll<&GenericToken<D>>, FluidError>
     where
         T: FixedByteRepr<1>,
         P: FixedByteRepr<1>,
     {
-        if self.is_current_valid() {
-            // Check to see if we can use our active protocol.
-            Ok(self.active_token.as_ref().unwrap().token())
-        } else {
-            // We need to refresh it.
-            self.refresh_token(token_type, token_protocol).await?;
-            Ok(self.active_token.as_ref().unwrap().token())
+        match self.state {
+            ClientState::Idle => return Err(FluidError::ClientNotRegistered),
+            ClientState::Registered => {
+                // If we are in the registered state we may have a valid token but this is not a certainty.
+                if self.is_current_valid() {
+                    // Check to see if we can use our active protocol.
+                    Ok(Poll::Ready(self.active_token.as_ref().unwrap().token()))
+                } else {
+                    // We need to refresh it.
+                    self.new_tok_req(conn, token_type, token_protocol)?;
+                    self.state = ClientState::SendingToken;
+                    Ok(Poll::Pending)
+                }
+            },
+            ClientState::SendingToken => {
+                unreachable!()
+            }
         }
+        
     }
 }
+
 
 
 
@@ -663,6 +702,6 @@ mod tests {
 
         // println!("Modified: {:032b}", bruh);
 
-        panic!("");
+        // panic!("");
     }
 }

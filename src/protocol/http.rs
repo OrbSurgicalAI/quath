@@ -24,7 +24,19 @@ pub(crate) enum NetworkError {
     HyperError(#[from] hyper::Error)
 }
 
+pub(crate) fn prep_request<S>(request: Request<S>) -> Result<Request<Full<Bytes>>, NetworkError>
+where 
+    S: Serialize
+{
 
+    let request_new = Bytes::from_owner(serde_json::to_vec(request.body())?);
+
+    let (parts, _) = request.into_parts();
+
+    let modified = Request::from_parts(parts, Full::from(request_new));
+
+    Ok(modified)
+}
 
 impl NetworkClient {
     pub async fn new() -> Self {

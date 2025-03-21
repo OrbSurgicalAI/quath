@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::token::{signature::{B64Owned, B64Ref, KeyChain}, token::GenericToken};
 
-#[derive(Serialize)]
+
 pub struct CycleRequest<'a, P, M, KC>
 where
     P: Serialize,
@@ -17,7 +17,26 @@ where
     pub metadata: &'a Option<M>,
 }
 
-#[derive(Serialize)]
+impl<'a, P, M, KC> Serialize for CycleRequest<'a, P, M, KC>
+where 
+    P: Serialize,
+    M: Serialize,
+    KC: KeyChain
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        let mut stru = serializer.serialize_struct("Request", 2)?;
+        stru.serialize_field("id", &self.id)?;
+        stru.serialize_field("protocol", &self.protocol)?;
+        stru.serialize_field("key", &self.key)?;
+        stru.serialize_field("signature", &self.signature)?;
+        stru.serialize_field("metadata", &self.metadata)?;
+        stru.end()
+    }
+}
+
+
 pub struct TokenStampRequest<'a, D, KC>
 where 
     KC: KeyChain
@@ -26,9 +45,91 @@ where
     pub signature: B64Ref<'a, KC::Signature>
 }
 
+impl<'a, D, KC> Serialize for TokenStampRequest<'a, D, KC>
+where 
+    KC: KeyChain
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        let mut stru = serializer.serialize_struct("Request", 2)?;
+        stru.serialize_field("token", &self.token)?;
+        stru.serialize_field("signature", &self.signature)?;
+        stru.end()
+        
+    }
+}
+
 
 #[derive(Deserialize)]
 pub struct PostTokenResponse<D>
 {
     expiry: D
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::Serialize;
+    use uuid::Uuid;
+
+    use crate::{protocol::web::payload::CycleRequest, testing::{DummyKeyChain, DummySignature, ExampleProtocol}, token::{signature::{B64Owned, B64Ref, KeyChain, Signature}, token::GenericToken}};
+
+    use super::TokenStampRequest;
+
+
+    #[test]
+    pub fn serialize_token_stamp_integrity() {
+
+        let token = GenericToken::random();
+        let dummy_sig = DummySignature::random();
+
+        let wow: TokenStampRequest<'_, (), DummyKeyChain> = TokenStampRequest {
+            token: crate::token::signature::B64Ref(&token),
+            signature: B64Ref(&dummy_sig)
+        };
+
+
+        let object = serde_json::to_value(&wow).unwrap();
+        assert!(object.is_object());
+        assert!(object.get("token").is_some_and(|f| f.is_string()));
+        assert!(object.get("signature").is_some_and(|f| f.is_string()));
+        
+        // panic!("Hello: {}", serde_json::to_string(&wow).unwrap());
+    }
+
+    #[test]
+    pub fn serialize_cycle_request_integrity() {
+
+        #[derive(Serialize)]
+        struct TestStub {
+            a: u8
+        }
+
+        let token = GenericToken::random();
+        let dummy_sig = DummySignature::random();
+        let (pubk, privk) = DummyKeyChain::generate();
+        let protocol = "hello";
+        let metadata = Some(TestStub {
+            a: 4
+        });
+
+        let wow: CycleRequest<'_, &str, TestStub, DummyKeyChain> = CycleRequest {
+            id: Uuid::nil(),
+            key: B64Ref(&pubk),
+            protocol: &protocol,
+            metadata: &metadata,
+            signature: B64Owned(dummy_sig)
+        };
+
+
+        let object = serde_json::to_value(&wow).unwrap();
+        assert!(object.is_object());
+        assert!(object.get("id").is_some_and(|f| f.is_string()));
+        assert!(object.get("key").is_some_and(|f| f.is_string()));
+        assert!(object.get("protocol").is_some_and(|f| f.is_string()));
+        assert!(object.get("metadata").is_some_and(|f| f.is_object()));
+        assert!(object.get("signature").is_some_and(|f| f.is_string()));
+        
+        // panic!("Hello: {}", serde_json::to_string(&wow).unwrap());
+    }
 }

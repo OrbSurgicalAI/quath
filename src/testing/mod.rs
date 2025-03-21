@@ -1,7 +1,8 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use arbitrary::Arbitrary;
-use rand::Rng;
+use rand::{Rng, RngCore};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
@@ -152,6 +153,17 @@ pub struct DummySignature {
     underlying: [u8; 8]
 }
 
+impl DummySignature {
+    pub fn random() -> Self {
+        let mut exam = vec![0u8; 256];
+        rand::rng().fill_bytes(&mut exam);
+        Self {
+            actual: exam,
+        underlying: rand::rng().random()
+        }
+    }
+}
+
 #[derive(Arbitrary, PartialEq, Debug, Clone)]
 pub struct TestTimeStub {
     pub seconds: u64,
@@ -166,8 +178,8 @@ impl TimeObj for TestTimeStub {
     }
 }
 
-#[derive(Arbitrary, PartialEq, Debug, Clone)]
-pub struct ExampleProtocol(u8);
+#[derive(Arbitrary, PartialEq, Debug, Clone, Serialize)]
+pub struct ExampleProtocol(pub u8);
 
 impl FixedByteRepr<1> for ExampleProtocol {
     fn to_fixed_repr(&self) -> [u8; 1] {

@@ -56,7 +56,18 @@ impl<D> AsRef<[u8]> for GenericToken<D> {
     }
 }
 
+
+impl GenericToken<()> {
+    pub fn random() -> Self {
+        Self {
+            timestamp: (),
+            data: rand::rng().random()
+        }
+    }
+}
+
 impl<D> GenericToken<D> {
+
     pub fn get_bytes(&self) -> &[u8; 74] {
         &self.data
     }
