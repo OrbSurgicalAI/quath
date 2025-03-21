@@ -1,6 +1,6 @@
 use http::StatusCode;
 
-use crate::protocol::web::{container::rfc3339::{Rfc3339, Rfc3339Container}, payload::PostTokenResponse};
+use crate::{protocol::web::{container::{b64::B64Owned, rfc3339::{Rfc3339, Rfc3339Container}}, payload::PostTokenResponse}, token::token::GenericToken};
 
 use super::verdict::Verdict;
 pub enum TokenVerdict<'a, D> {
@@ -19,7 +19,7 @@ pub enum TokenVerdict<'a, D> {
     /// and the client should retry.
     InternalServerError,
     /// The token was succesfully created.
-    Success { expiry: D },
+    Success { token: GenericToken<D>, expiry: D },
     /// There is already a token that exists with this identity
     Conflict 
 }
@@ -46,18 +46,14 @@ where
                 ),
             ),
             Self::BadTokenFormat => Verdict::custom("BadTokenFormat", StatusCode::UNPROCESSABLE_ENTITY,"The token was not correctly formed and thus could not be read by the server."),
-            Self::InternalServerError => Verdict::custom("InternalServerError", StatusCode::INTERNAL_SERVER_ERROR, "The server failed to process the request because of some internal error, please try again."),
-            Self::NotImplemented(requested) => Verdict::custom(
-                "NotImplemented",
-                StatusCode::NOT_IMPLEMENTED,
-                format!("The request was using the \"{requested}\" protocol which the server does not support.")
-            ),
+            Self::InternalServerError => Verdict::internal_server_error(),
+            Self::NotImplemented(requested) => Verdict::not_implemented(requested),
             Self::TimestampInvalid => Verdict::custom(
                 "TimestampInvalid",
                 StatusCode::FORBIDDEN,
                 format!("The timestamp was either too old or in the future.")
             ),
-            Self::Success { expiry } => Verdict::Result { obj: PostTokenResponse { expiry: Rfc3339Container(expiry) }, code: StatusCode::CREATED },
+            Self::Success { token, expiry } => Verdict::Result { obj: PostTokenResponse { token: B64Owned(token), expiry: Rfc3339Container(expiry) }, code: StatusCode::CREATED },
             Self::Conflict => Verdict::custom("Conflict", StatusCode::CONFLICT, "A token already exists with these details")
         }
     }

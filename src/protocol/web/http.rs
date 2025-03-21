@@ -1,16 +1,34 @@
-use http::{header::{self, CONTENT_TYPE}, Method, Request, Response, StatusCode};
+use http::{
+    Method, Request, Response, StatusCode,
+    header::{self, CONTENT_TYPE},
+};
 use http_body_util::Empty;
 use hyper::body::Bytes;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{protocol::{error::FluidError, executor::Connection}, token::{signature::{B64Owned, B64Ref, KeyChain, PrivateKey, PublicKey}, token::GenericToken}};
+use crate::{
+    protocol::{error::FluidError, executor::Connection},
+    token::{
+        signature::{KeyChain, PrivateKey, PublicKey},
+        token::GenericToken,
+    },
+};
 
-use super::{container::rfc3339::Rfc3339, payload::{CycleRequest, PostTokenResponse, TokenStampRequest}, server::{cycle::CycleVerdict, token::TokenVerdict, verdict::Verdict}};
+use super::{
+    container::{
+        b64::{B64Owned, B64Ref},
+        rfc3339::Rfc3339,
+    },
+    payload::{CycleRequest, PostTokenResponse, TokenStampRequest},
+    server::{cycle::CycleVerdict, token::TokenVerdict, verdict::Verdict},
+};
 
-pub(crate) fn form_post_token_response<D>(verdict: TokenVerdict<'_, D>) -> Result<Response<String>, FluidError>
-where 
-    D: Rfc3339
+pub(crate) fn form_post_token_response<D>(
+    verdict: TokenVerdict<'_, D>,
+) -> Result<Response<String>, FluidError>
+where
+    D: Rfc3339,
 {
     let verdict: Verdict<PostTokenResponse<D>> = verdict.into();
     let code = verdict.code();
@@ -18,18 +36,21 @@ where
     Response::builder()
         .status(code)
         .header(CONTENT_TYPE, "application/json")
-        .body(verdict.to_json_string().or(Err(FluidError::SerdeError))?).or(Err(FluidError::FailedFormingTokenPostResponse))
+        .body(verdict.to_json_string().or(Err(FluidError::SerdeError))?)
+        .or(Err(FluidError::FailedFormingTokenPostResponse))
 }
 
-
-pub(crate) fn form_cycle_response(verdict: CycleVerdict<'_>) -> Result<Response<String>, FluidError> {
+pub(crate) fn form_cycle_response(
+    verdict: CycleVerdict<'_>,
+) -> Result<Response<String>, FluidError> {
     let verdict: Verdict<()> = verdict.into();
     let code = verdict.code();
 
     Response::builder()
         .status(code)
         .header(CONTENT_TYPE, "application/json")
-        .body(verdict.to_json_string().or(Err(FluidError::SerdeError))?).or(Err(FluidError::FailedFormingCycleResponse))
+        .body(verdict.to_json_string().or(Err(FluidError::SerdeError))?)
+        .or(Err(FluidError::FailedFormingCycleResponse))
 }
 
 /// Forms a cycle request as an HTTP reequest.

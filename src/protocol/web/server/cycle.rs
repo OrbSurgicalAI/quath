@@ -17,18 +17,8 @@ pub enum CycleVerdict<'a> {
 impl<'a> Into<Verdict<()>> for CycleVerdict<'a> {
     fn into(self) -> Verdict<()> {
         match self {
-            CycleVerdict::InternalServerError => Verdict::custom(
-                "InternalServerError",
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "The server failed to process this request. Please retry.",
-            ),
-            CycleVerdict::NotImplemented(requested) => Verdict::custom(
-                "NotImplemented",
-                StatusCode::NOT_IMPLEMENTED,
-                format!(
-                    "The request used the protocol \"{requested}\" but this is not supported by the server."
-                ),
-            ),
+            CycleVerdict::InternalServerError => Verdict::internal_server_error(),
+            CycleVerdict::NotImplemented(requested) => Verdict::not_implemented(requested),
             CycleVerdict::Success => Verdict::Result {
                 obj: (),
                 code: StatusCode::OK,

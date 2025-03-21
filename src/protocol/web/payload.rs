@@ -1,10 +1,10 @@
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::token::{signature::{B64Owned, B64Ref, KeyChain}, token::GenericToken};
+use crate::token::{signature::KeyChain, token::GenericToken};
 
-use super::container::rfc3339::{Rfc3339, Rfc3339Container, Rfc3339Str};
-
+use super::container::{b64::{B64Owned, B64Ref}, rfc3339::{Rfc3339, Rfc3339Container, Rfc3339Str}};
+use crate::protocol::executor::FixedByteRepr;
 
 pub struct CycleRequest<'a, P, M, KC>
 where
@@ -67,6 +67,9 @@ where
 #[derive(Deserialize, Serialize)]
 pub struct PostTokenResponse<D>
 {
+    #[serde(bound(serialize = ""))]
+    #[serde(bound(deserialize = "D: FixedByteRepr<8>"))]
+    pub token: B64Owned<GenericToken<D>>,
     #[serde(bound(deserialize = "D: Rfc3339"))]
     #[serde(bound(serialize = "D: Rfc3339"))]
     pub expiry: Rfc3339Container<D>
@@ -79,7 +82,7 @@ mod tests {
     use serde::Serialize;
     use uuid::Uuid;
 
-    use crate::{protocol::web::payload::CycleRequest, testing::{DummyKeyChain, DummySignature, ExampleProtocol}, token::{signature::{B64Owned, B64Ref, KeyChain, Signature}, token::GenericToken}};
+    use crate::{protocol::web::{container::b64::{B64Owned, B64Ref}, payload::CycleRequest}, testing::{DummyKeyChain, DummySignature, ExampleProtocol}, token::{signature::{KeyChain, Signature}, token::GenericToken}};
 
     use super::TokenStampRequest;
 
@@ -91,7 +94,7 @@ mod tests {
         let dummy_sig = DummySignature::random();
 
         let wow: TokenStampRequest<'_, (), DummyKeyChain> = TokenStampRequest {
-            token: crate::token::signature::B64Ref(&token),
+            token: B64Ref(&token),
             signature: B64Ref(&dummy_sig)
         };
 

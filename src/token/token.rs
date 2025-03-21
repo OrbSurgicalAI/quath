@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, fmt::Debug, ops::Deref};
 
-use rand::Rng;
+use rand::{Rng, RngCore};
 use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
 
@@ -64,12 +64,17 @@ impl GenericToken<()> {
             data: rand::rng().random()
         }
     }
+    
 }
 
 impl<D> GenericToken<D> {
 
     pub fn get_bytes(&self) -> &[u8; 74] {
         &self.data
+    }
+    pub fn randomize_body(mut self) -> Self {
+        rand::rng().fill_bytes(&mut self.data[42..]);
+        self
     }
 }
 
@@ -81,6 +86,30 @@ impl<D: Clone> Clone for GenericToken<D> {
         }
     }
 }
+
+impl<D> TryFrom<Vec<u8>> for GenericToken<D>
+where 
+    D: FixedByteRepr<8>
+{
+    type Error = FluidError;
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        assert_eq!(value.len(), 74);
+
+        let timestamp: [u8; 8] = value[34..42].try_into().or(Err(FluidError::FailedDeserTimestamp))?;
+        let time = D::from_fixed_repr(timestamp);
+        Ok(Self {
+            data: value.try_into().or(Err(FluidError::FailedDeserBody))?,
+            timestamp: time
+        })
+
+    }
+}
+
+// impl<D> AsRef<[u8]> for GenericToken<D> {
+//     fn as_ref(&self) -> &[u8] {
+//         &self.data
+//     }
+// }
 
 
 impl<D, T, P> PartialEq for FluidToken<D, T, P>

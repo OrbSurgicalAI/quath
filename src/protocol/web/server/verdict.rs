@@ -28,6 +28,12 @@ where
 }
 
 impl<O> Verdict<O> {
+    pub fn internal_server_error() -> Self {
+        Self::custom("InternalServerError", StatusCode::INTERNAL_SERVER_ERROR, "The server failed to process the request because of some internal error, please try again.")
+    }
+    pub fn not_implemented(requested: &str) -> Self {
+        Self::custom("NotImplemented", StatusCode::NOT_IMPLEMENTED, format!("The request was using the \"{requested}\" protocol which the server does not support."))
+    }
     pub fn custom<B>(name: &str, code: StatusCode, message: B) -> Self
     where 
         B: AsRef<str>

@@ -3,6 +3,10 @@ use std::marker::PhantomData;
 use base64::{prelude::BASE64_URL_SAFE, DecodeError, Engine};
 use serde::{de::Visitor, Deserialize, Serialize};
 
+use crate::protocol::error::FluidError;
+
+use super::error::ContainerError;
+
 
 pub struct B64Owned<S>(pub S);
 
@@ -34,7 +38,7 @@ struct B64Visitor<O> {
 
 impl<'de, O> Visitor<'de> for B64Visitor<O>
 where
-    O: From<Vec<u8>>,
+    O: TryFrom<Vec<u8>>,
 {
     type Value = B64Owned<O>;
 
@@ -61,18 +65,18 @@ where
 }
 
 
-fn visit_str_inner<O>(candidate: &str) -> Result<B64Owned<O>, DecodeError>
+fn visit_str_inner<O>(candidate: &str) -> Result<B64Owned<O>, ContainerError>
 where 
-    O: From<Vec<u8>>
+    O: TryFrom<Vec<u8>>
 {
-    let decoded = BASE64_URL_SAFE.decode(candidate)?;
-    Ok(B64Owned(O::from(decoded)))
+    let decoded = BASE64_URL_SAFE.decode(candidate).or(Err(ContainerError::Base64ParseFailure))?;
+    Ok(B64Owned(O::try_from(decoded).or(Err(ContainerError::Base64ParseFailure))?))
 }
 
 
 impl<'de, T> Deserialize<'de> for B64Owned<T>
 where
-    T: From<Vec<u8>>,
+    T: TryFrom<Vec<u8>>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

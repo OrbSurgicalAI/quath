@@ -13,11 +13,11 @@ use uuid::Uuid;
 use crate::{
     protocol::{http::prep_request, web::http::form_token_post},
     token::{
-        self,
-        signature::{B64Owned, B64Ref, KeyChain, PrivateKey, PublicKey, Signature},
+        signature::{KeyChain, PrivateKey},
         token::{AliveToken, FluidToken, GenericToken},
     },
 };
+
 
 use super::{
     config::Configuration,
@@ -214,7 +214,7 @@ where
                     outstanding: outstanding
                 });
             }
-            ClientState::ReceivedStampResponse { decision, outstanding } => {
+            ClientState::ReceivedStampResponse { .. } => {
                 /* Illegal transition:  */
                 panic!("Received stamp response twice in a row?")
             },
@@ -257,12 +257,13 @@ where
         C: ProtocolCtx<D>,
         C::Protocol: Serialize
     {
-        if let ClientState::ReceivedStampResponse { decision, outstanding } = self.state.take().unwrap() {
+        if let ClientState::ReceivedStampResponse { decision, .. } = self.state.take().unwrap() {
             /* We have received a response, we now will process it. */
             match decision {
-                ExecResponse::Return { expiry } => {
+                ExecResponse::Return { token, expiry } => {
                     /* Success */
-                    self.active_token = Some(AliveToken::from_raw(outstanding, expiry));
+                    // TODO: CHECK TO SEE IF THE OUTSTANDING AND THE NEW ONE HAVE MATCHING FILDS
+                    self.active_token = Some(AliveToken::from_raw(token, expiry));
                     self.state = Some(ClientState::Registered);
                     self.return_poll_active_token()
                 },
@@ -322,7 +323,7 @@ where
 /// Parse the stamp response into a usable set of data.
 fn parse_stamp_response<D>(raw: FullResponse) -> Result<ExecResponse<D>, FluidError>
 where
-    D: Rfc3339
+    D: Rfc3339 + FixedByteRepr<8>
 {
     if raw.status() == StatusCode::RESET_CONTENT {
         // Needs a cycle.
@@ -332,7 +333,7 @@ where
         let ptr: PostTokenResponse<D> = raw
             .parse_json()
             .map_err(|e| FluidError::FailedDeserializingPtr(e))?;
-        Ok(ExecResponse::Return { expiry: ptr.expiry.inner() })
+        Ok(ExecResponse::Return { token: ptr.token.inner(), expiry: ptr.expiry.inner() })
     } else {
         Ok(ExecResponse::Invalid(raw.status()))
     }
@@ -341,7 +342,10 @@ where
 
 
 pub enum ExecResponse<D> {
-    Return { expiry: D },
+    Return {
+        token: GenericToken<D>,
+        expiry: D
+    },
     CycleRequired,
     Invalid(StatusCode),
 }
@@ -353,6 +357,8 @@ pub struct Hello {
 
 #[cfg(test)]
 mod tests {
+    use std::task::Poll;
+
     use chrono::{DateTime, Utc};
     use http_body_util::{BodyExt, Empty, Full};
     use hyper::{
@@ -400,16 +406,22 @@ mod tests {
         assert!(initial.is_pending());
 
         // We should be in the sending token state.
-        if let ClientState::SendingToken { .. } = executor.state.as_ref().unwrap() {} else {
+        let inner_token: GenericToken<TestTimeStub>;
+        if let ClientState::SendingToken { outstanding } = executor.state.as_ref().unwrap() {
+            inner_token = GenericToken::try_from(outstanding.get_bytes().to_vec()).unwrap();
+        } else {
             panic!("The client was not in the sending token state after being polled!");
         }
+        let inner_token = inner_token.randomize_body();
         
+
         // There should be an item in the queue.
         assert_eq!(executor.transmit.len(), 1);
         let _ = executor.get_transmit().as_ref().unwrap();
 
         // We will emulate the server approving this.
         let success = form_post_token_response(TokenVerdict::Success { 
+            token: inner_token.clone(),
             expiry: TestTimeStub::from_millis_since_epoch(100)
         }).unwrap();
 
@@ -430,6 +442,12 @@ mod tests {
         // Advance the state machine
         let partway = executor.poll_token(&contex, ExampleType(0)).unwrap();
         assert!(partway.is_ready());
+        let Poll::Ready(tok) = partway else {
+            panic!("Could not get the token out of the poll object.");
+        };
+
+        // Verify that the client is using the modified bytes.
+        assert_eq!(tok.get_bytes(), inner_token.get_bytes());
 
         // Execution is complete!
 
