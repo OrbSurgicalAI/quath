@@ -1,32 +1,59 @@
 use std::{cmp::Ordering, marker::PhantomData, task::Poll};
 
 use base64::{Engine, prelude::BASE64_URL_SAFE};
+use chrono::{DateTime, Utc};
 use http_body_util::Full;
-use hyper::{body::{Body, Bytes}, header, Error, Method, Request, Uri};
+use hyper::{
+    Error, Method, Request, Response, StatusCode, Uri,
+    body::{Body, Bytes},
+    header,
+};
 use uuid::Uuid;
 
-use crate::{protocol::http::prep_request, token::{
-    self,
-    signature::{B64Owned, B64Ref, KeyChain, PrivateKey, PublicKey, Signature},
-    token::{AliveToken, FluidToken, GenericToken},
-}};
+use crate::{
+    protocol::http::prep_request,
+    token::{
+        self,
+        signature::{B64Owned, B64Ref, KeyChain, PrivateKey, PublicKey, Signature},
+        token::{AliveToken, FluidToken, GenericToken},
+    },
+};
 
-use super::{config::Configuration, error::FluidError, web::payload::{CycleRequest, TokenStampRequest}};
-use serde::Serialize;
+use super::{
+    config::Configuration,
+    error::FluidError,
+    web::{
+        body::FullResponse,
+        payload::{CycleRequest, PostTokenResponse, TokenStampRequest},
+    },
+};
+use serde::{Deserialize, Serialize};
 
 /// Manages the context of the protocol.
 pub trait ProtocolCtx<D> {
+    type Protocol;
     /// Compares the current time against another time.
     fn current_time(&self) -> D;
     fn config(&self) -> &Configuration;
+    fn connection(&self) -> &Connection;
+    fn protocol(&self) -> Self::Protocol;
 }
 
 pub trait TimeObj {
-    fn cmp_within(&self, other: &Self, bound: u64) -> Ordering {
-        (self.seconds() + bound).cmp(&(other.seconds()))
+    fn cmp_within(&self, other: &Self, bound: i64) -> Ordering {
+        (self.seconds_since_epoch() + bound).cmp(&(other.seconds_since_epoch()))
     }
-    fn from_seconds(seconds: u64) -> Self;
-    fn seconds(&self) -> u64;
+    fn from_millis_since_epoch(seconds: i64) -> Self;
+    fn seconds_since_epoch(&self) -> i64;
+}
+
+impl TimeObj for DateTime<Utc> {
+    fn from_millis_since_epoch(seconds: i64) -> Self {
+        Self::from_timestamp_millis(seconds).unwrap()
+    }
+    fn seconds_since_epoch(&self) -> i64 {
+        self.timestamp()
+    }
 }
 
 pub trait FixedByteRepr<const N: usize> {
@@ -34,418 +61,47 @@ pub trait FixedByteRepr<const N: usize> {
     fn from_fixed_repr(val: [u8; N]) -> Self;
 }
 
-pub trait SyncProtocolExtrServer<PUB, S, D, CTX, M>
-where
-    D: TimeObj,
-    CTX: ProtocolCtx<D>,
-    PUB: PublicKey<S>,
-{
-    type Error;
-    fn ctx(&self) -> &CTX;
-    fn register(
-        &self,
-        id: Uuid,
-        pb: PUB,
-        last_key_cycle: D,
-        metadata: Option<M>,
-    ) -> Result<(), Self::Error>;
-    fn deregister(&self, id: Uuid) -> Result<Uuid, Self::Error>;
-    fn patch(&self, id: Uuid, metadata: Option<M>) -> Result<(), Self::Error>;
-    fn stamp<T, P>(&self, token: FluidToken<D, T, P>) -> Result<FluidToken<D, T, P>, Self::Error>;
-    fn revoke<T, P>(&self, token: &FluidToken<D, T, P>)
-    -> Result<FluidToken<D, T, P>, Self::Error>;
-    fn revoke_all(&self, id: Uuid) -> Result<(), Self::Error>;
-}
-
-// pub trait BaseProtocol {
-//     fn generate<D, T, P, C: ProtocolCtx<D>>(ctx: &C, token_type: &T, protocol: &P) -> FluidToken<D, T, P>;
-// }
-
-pub trait SyncClient<D, C, KC, T, P>
-where
-    C: ProtocolCtx<D>,
-    KC: KeyChain,
-    D: FixedByteRepr<8> + TimeObj,
-    T: FixedByteRepr<1> + Clone,
-    P: FixedByteRepr<1> + Clone,
-    KC::Error: Into<Self::Err>,
-{
-    type Err: From<FluidError> + From<KC::Error>;
-
-    fn ctx(&self) -> &C;
-    fn get_id(&self) -> Result<Option<Uuid>, Self::Err>;
-    fn set_id(&mut self, id: Option<Uuid>) -> Result<Option<Uuid>, Self::Err>;
-    fn private_key(&self) -> Result<&Option<KC::Private>, Self::Err>;
-    fn set_private_key(&mut self, privkey: Option<KC::Private>) -> Result<(), Self::Err>;
-    fn get_current_token(&self) -> Result<&Option<AliveToken<D>>, Self::Err>;
-    fn set_current_token(&mut self, token: Option<AliveToken<D>>) -> Result<(), Self::Err>;
-    fn stamp_request(
-        &self,
-        id: Uuid,
-        token: &GenericToken<D>,
-        signature: &KC::Signature,
-    ) -> Result<Response<D>, Self::Err>;
-    fn cycle_request(
-        &self,
-        id: Uuid,
-        public: &KC::Public,
-        new_sig: &KC::Signature,
-        old_sig: &KC::Signature,
-    ) -> Result<bool, Self::Err>;
-    fn register_request(&self, id: Uuid, public: &KC::Public) -> Result<Uuid, Self::Err>;
-    fn generate(&self, token_type: T, protocol: P) -> Result<FluidToken<D, T, P>, Self::Err> {
-        Ok(FluidToken::generate(
-            self.ctx(),
-            self.get_id()?.ok_or(FluidError::ClientNotRegistered)?,
-            token_type,
-            protocol,
-        ))
-    }
-
-    fn sign(
-        &self,
-        token: FluidToken<D, T, P>,
-    ) -> Result<(GenericToken<D>, KC::Signature), Self::Err>
-    where
-        T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>,
-    {
-        let sign = self
-            .private_key()?
-            .as_ref()
-            .ok_or(FluidError::ClientNoPrivateKey)?
-            .sign(&token.to_bytes())?;
-        Ok((token.generic(), sign))
-    }
-
-    fn refresh_token(
-        &mut self,
-        token_type: T,
-        token_protocol: P,
-    ) -> Result<&GenericToken<D>, Self::Err>
-    where
-        T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>,
-    {
-        let (new_tok, new_sig) =
-            self.sign(self.generate(token_type.clone(), token_protocol.clone())?)?;
-
-        let response = self.stamp_request(
-            self.get_id()?.ok_or(FluidError::ClientNotRegistered)?,
-            &new_tok,
-            &new_sig,
-        )?;
-        match response {
-            Response::Return { token, life } => {
-                self.set_current_token(Some(AliveToken::from_raw(token, life)))?;
-                Ok(self.get_current_token()?.as_ref().unwrap().token())
-            }
-            Response::Invalid => {
-                return Err(FluidError::ServerRejectedToken)?;
-            }
-            Response::CycleRequired => {
-                let (public, private) = KC::generate();
-
-                let sig_new = private.sign(public.as_bytes())?;
-                let sig_old = self
-                    .private_key()?
-                    .as_ref()
-                    .ok_or(FluidError::ClientNoPrivateKey)?
-                    .sign(public.as_bytes())?;
-
-                let cycle = self.cycle_request(
-                    self.get_id()?.ok_or(FluidError::ClientNotRegistered)?,
-                    &public,
-                    &sig_new,
-                    &sig_old,
-                )?;
-                if cycle {
-                    // Success! Let's store it and rerun.
-                    self.set_private_key(Some(private))?;
-                    return self.refresh_token(token_type, token_protocol);
-                } else {
-                    return Err(FluidError::ServerRejectedCycle)?;
-                }
-            }
-        }
-    }
-    fn is_registered(&self) -> Result<bool, Self::Err> {
-        Ok(self.get_id()?.is_some() && self.private_key()?.is_some())
-    }
-    fn is_current_valid(&self) -> Result<bool, Self::Err> {
-        if let Some(token) = self.get_current_token()? {
-            Ok(token.is_alive(self.ctx()))
-        } else {
-            Ok(false)
-        }
-    }
-    fn register(&mut self) -> Result<(), Self::Err> {
-        let (public, private) = KC::generate();
-        let id = Uuid::new_v4();
-
-        self.register_request(id, &public)?;
-
-        self.set_private_key(Some(private))?;
-        self.set_id(Some(id))?;
-        Ok(())
-    }
-    fn execute(&mut self, token_type: T, token_protocol: P) -> Result<&GenericToken<D>, Self::Err>
-    where
-        T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>,
-    {
-        if !self.is_registered()? {
-            // We are not registered.
-            self.register()?;
-        }
-        if self.is_current_valid()? {
-            return Ok(self.get_current_token()?.as_ref().unwrap().token());
-        }
-
-        self.refresh_token(token_type, token_protocol)
-    }
-    fn get_token(
-        &mut self,
-        token_type: T,
-        token_protocol: P,
-    ) -> Result<&GenericToken<D>, Self::Err> {
-        self.execute(token_type, token_protocol)
-    }
-}
-
-pub trait AsyncClient<D, C, KC, T, P>: Sized
-where
-    C: ProtocolCtx<D>,
-    KC: KeyChain,
-    D: FixedByteRepr<8> + TimeObj + 'static,
-    T: FixedByteRepr<1> + Clone,
-    P: FixedByteRepr<1> + Clone,
-    KC::Error: Into<Self::Err>,
-{
-    type Err: From<FluidError> + From<KC::Error>;
-
-    fn ctx<'a>(&'a self) -> impl Future<Output = &'a C>
-    where
-        C: 'a;
-    fn get_id<'a>(&self) -> impl Future<Output = Result<Option<Uuid>, Self::Err>>
-    where
-        C: 'a;
-
-    fn set_id(&mut self, id: Option<Uuid>)
-    -> impl Future<Output = Result<Option<Uuid>, Self::Err>>;
-    fn private_key<'a>(
-        &'a self,
-    ) -> impl Future<Output = Result<&'a Option<KC::Private>, Self::Err>>
-    where
-        KC::Private: 'a;
-    async fn set_private_key(&mut self, privkey: Option<KC::Private>) -> Result<(), Self::Err>;
-    async fn get_current_token<'a>(&'a self) -> Result<&'a Option<AliveToken<D>>, Self::Err>
-    where
-        D: 'a;
-    async fn set_current_token(&mut self, token: Option<AliveToken<D>>) -> Result<(), Self::Err>;
-    async fn stamp_request(
-        &self,
-        id: Uuid,
-        token: &GenericToken<D>,
-        signature: &KC::Signature,
-    ) -> Result<Response<D>, Self::Err>;
-    async fn cycle_request(
-        &self,
-        id: Uuid,
-        public: &KC::Public,
-        new_sig: &KC::Signature,
-        old_sig: &KC::Signature,
-    ) -> Result<bool, Self::Err>;
-    async fn register_request(&self, id: Uuid, public: &KC::Public) -> Result<Uuid, Self::Err>;
-    async fn generate(&self, token_type: T, protocol: P) -> Result<FluidToken<D, T, P>, Self::Err> {
-        Ok(FluidToken::generate(
-            self.ctx().await,
-            self.get_id()
-                .await?
-                .ok_or(FluidError::ClientNotRegistered)?,
-            token_type,
-            protocol,
-        ))
-    }
-
-    async fn sign(
-        &self,
-        token: FluidToken<D, T, P>,
-    ) -> Result<(GenericToken<D>, KC::Signature), Self::Err>
-    where
-        T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>,
-    {
-        let sign = self
-            .private_key()
-            .await?
-            .as_ref()
-            .ok_or(FluidError::ClientNoPrivateKey)?
-            .sign(&token.to_bytes())?;
-        Ok((token.generic(), sign))
-    }
-
-    async fn refresh_token<'a>(
-        &'a mut self,
-        token_type: T,
-        token_protocol: P,
-    ) -> Result<&'a GenericToken<D>, Self::Err>
-    where
-        T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>,
-        D: 'a,
-    {
-        let (new_tok, new_sig) = self
-            .sign(
-                self.generate(token_type.clone(), token_protocol.clone())
-                    .await?,
-            )
-            .await?;
-        let response = self
-            .stamp_request(
-                self.get_id()
-                    .await?
-                    .ok_or(FluidError::ClientNotRegistered)?,
-                &new_tok,
-                &new_sig,
-            )
-            .await?;
-        match response {
-            Response::Return { token, life } => {
-                self.set_current_token(Some(AliveToken::from_raw(token, life)))
-                    .await?;
-                Ok(self.get_current_token().await?.as_ref().unwrap().token())
-            }
-            Response::Invalid => {
-                return Err(FluidError::ServerRejectedToken)?;
-            }
-            Response::CycleRequired => {
-                let (public, private) = KC::generate();
-
-                let sig_new = private.sign(public.as_bytes())?;
-                let sig_old = self
-                    .private_key()
-                    .await?
-                    .as_ref()
-                    .ok_or(FluidError::ClientNoPrivateKey)?
-                    .sign(public.as_bytes())?;
-
-                let cycle = self
-                    .cycle_request(
-                        self.get_id()
-                            .await?
-                            .ok_or(FluidError::ClientNotRegistered)?,
-                        &public,
-                        &sig_new,
-                        &sig_old,
-                    )
-                    .await?;
-                if cycle {
-                    // Success! Let's store it and rerun.
-                    self.set_private_key(Some(private)).await?;
-
-                    // Try again
-                    let (new_tok, new_sig) = self
-                        .sign(
-                            self.generate(token_type.clone(), token_protocol.clone())
-                                .await?,
-                        )
-                        .await?;
-                    if let Response::Return { token, life } = self
-                        .stamp_request(
-                            self.get_id()
-                                .await?
-                                .ok_or(FluidError::ClientNotRegistered)?,
-                            &new_tok,
-                            &new_sig,
-                        )
-                        .await?
-                    {
-                        self.set_current_token(Some(AliveToken::from_raw(token, life)))
-                            .await?;
-                        Ok(self.get_current_token().await?.as_ref().unwrap().token())
-                    } else {
-                        Err(FluidError::ServerRejectedCycle)?
-                    }
-                } else {
-                    return Err(FluidError::ServerRejectedCycle)?;
-                }
-            }
-        }
-    }
-    async fn is_registered(&self) -> Result<bool, Self::Err> {
-        Ok(self.get_id().await?.is_some() && self.private_key().await?.is_some())
-    }
-    async fn is_current_valid(&self) -> Result<bool, Self::Err> {
-        if let Some(token) = self.get_current_token().await? {
-            Ok(token.is_alive(self.ctx().await))
-        } else {
-            Ok(false)
-        }
-    }
-    async fn register(&mut self) -> Result<(), Self::Err> {
-        let (public, private) = KC::generate();
-        let id = Uuid::new_v4();
-
-        self.register_request(id, &public).await?;
-
-        self.set_private_key(Some(private)).await?;
-        self.set_id(Some(id)).await?;
-        Ok(())
-    }
-    async fn execute(
-        &mut self,
-        token_type: T,
-        token_protocol: P,
-    ) -> Result<&GenericToken<D>, Self::Err>
-    where
-        T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>,
-    {
-        let wow = execute(self, Self::is_registered).await;
-        if !self.is_registered().await? {
-            // We are not registered.
-            self.register().await?;
-        }
-        if self.is_current_valid().await? {
-            return Ok(self.get_current_token().await?.as_ref().unwrap().token());
-        }
-
-        self.refresh_token(token_type, token_protocol).await
-    }
-    async fn get_token(
-        &mut self,
-        token_type: T,
-        token_protocol: P,
-    ) -> Result<&GenericToken<D>, Self::Err> {
-        self.execute(token_type, token_protocol).await
-    }
-}
-
 pub struct Registered;
 
-enum ClientState {
+enum ClientState<KC, D>
+where 
+    KC: KeyChain
+{
     Idle,
     Registered,
-    SendingToken
+    SendingToken {
+        outstanding: GenericToken<D>
+    },
+    ReceivedStampResponse {
+        decision: ExecResponse<D>,
+        outstanding: GenericToken<D>
+    },
+    CyclingKey {
+        new_private_key: KC::Private,
+        new_public_key: KC::Public
+    }
 }
 
-pub struct ClientProtocol<D, KC, CTX>
+type Container<D> = Option<D>;
+pub struct ClientProtocol<D, KC>
 where
     KC: KeyChain,
-    CTX: ProtocolCtx<D>,
 {
     id: Option<Uuid>,
-    connection: Connection,
     private_key: Option<KC::Private>,
     active_token: Option<AliveToken<D>>,
-    context: CTX,
-    state: ClientState,
-    transmit: Vec<Request<Full<Bytes>>>
+    state: Container<ClientState<KC, D>>,
+    transmit: Vec<Request<Full<Bytes>>>,
 }
 
 pub struct Connection {
     uri: Uri,
+}
+
+impl Connection {
+    pub fn from_uri(uri: Uri) -> Self {
+        Self { uri }
+    }
 }
 
 impl Connection {
@@ -454,43 +110,49 @@ impl Connection {
     }
 }
 
-
-
-impl<D, KC, CTX> ClientProtocol<D, KC, CTX>
+impl<D, KC> ClientProtocol<D, KC>
 where
-    D: TimeObj + FixedByteRepr<8>,
+    D: TimeObj + FixedByteRepr<8> + for<'de> Deserialize<'de>,
     KC: KeyChain,
-    CTX: ProtocolCtx<D>,
 {
+    pub fn new() -> Self {
+        Self {
+            active_token: None,
+            id: None,
+            private_key: None,
+            state: Container::Some(ClientState::Idle),
+            transmit: vec![],
+        }
+    }
     /// Checks and sees if the client is already registered.
     pub fn is_registered(&self) -> bool {
         self.active_token.is_some() && self.id.is_some()
     }
     /// Checks if the current token is valid.
-    pub fn is_current_valid(&self) -> bool {
+    pub fn is_current_valid<CTX>(&self, ctx: &CTX) -> bool
+    where
+        CTX: ProtocolCtx<D>,
+    {
         if let Some(token) = &self.active_token {
-            token.is_alive(&self.context)
+            token.is_alive(ctx)
         } else {
             false // we have no token so naturally it is not valid.
         }
     }
     /// Generates a specialized token and then proceeds to sign it. This
     /// process will convert the special token into a generic one.
-    fn gen_token_and_sign<T, P>(
+    fn gen_token_and_sign<T, CTX>(
         &mut self,
-        token_type: T,
-        token_protocol: P,
+        ctx: &CTX,
+        token_type: T
     ) -> Result<(GenericToken<D>, KC::Signature), FluidError>
     where
         T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>,
+        CTX: ProtocolCtx<D>,
+        CTX::Protocol: FixedByteRepr<1>
     {
-        let token = FluidToken::<D, T, P>::generate(
-            &self.context,
-            self.id.unwrap(),
-            token_type,
-            token_protocol,
-        );
+        let token =
+            FluidToken::<D, T, CTX::Protocol>::generate(ctx, self.id.unwrap(), token_type, ctx.protocol());
         let signature = self
             .private_key
             .as_ref()
@@ -500,79 +162,171 @@ where
 
         Ok((token.generic(), signature))
     }
-    /// Performs a token refresh.
-    fn refresh_token<T, P>(&mut self, conn: &Connection, token_type: T, token_protocol: P) -> Result<(), FluidError>
-    where
-        T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>,
-    {
-        let (token, signature) = self.gen_token_and_sign(token_type, token_protocol)?;
-
-        // let (token, signature) = self.gen_token_and_sign(token_type, token_protocol)?;
-        // let request = form_token_post(&self.connection, &token, &signature)?;
-
-        Ok(())
-    }
 
     /// This formulates and sends a new token request.
-    fn new_tok_req<T, P>(&mut self, conn: &Connection, token_type: T, token_protocol: P) -> Result<(), FluidError>
-    where 
+    /// 
+    /// This will also drive us into the sending token state.
+    fn new_tok_req<T, CTX>(
+        &mut self,
+        ctx: &CTX,
+        token_type: T
+    ) -> Result<(), FluidError>
+    where
         T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>
+        CTX: ProtocolCtx<D>,
+        CTX::Protocol: FixedByteRepr<1>
     {
         // We should be in the registered state when sending this out.
-        assert!(matches!(self.state, ClientState::Registered));
-        let (token, signature) = self.gen_token_and_sign(token_type, token_protocol)?;
-        let form = form_token_post::<D, KC>(&self.connection, &token, &signature)?;
+        assert!(matches!(self.state.as_ref().unwrap(), ClientState::Registered));
+        let (token, signature) = self.gen_token_and_sign(ctx, token_type)?;
+        let form = form_token_post::<D, KC>(ctx.connection(), &token, &signature)?;
         let serialized = prep_request(form).or(Err(FluidError::SerdeError))?;
 
+        // Enqueue this request.
+        self.transmit.push(serialized);
 
         Ok(())
-
     }
+    pub fn handle_input<T, P>(&mut self, response: FullResponse) -> Result<(), FluidError> {
+        match self.state.take().unwrap() {
+            ClientState::Idle => panic!("Client handled input while in idle."),
+            ClientState::Registered => panic!("Client handled input while in registered."),
+            ClientState::SendingToken { outstanding } => {
+                let parsed = parse_stamp_response(response)?;
+                self.state = Some(ClientState::ReceivedStampResponse {
+                    decision: parsed,
+                    outstanding: outstanding
+                });
+            }
+            ClientState::ReceivedStampResponse { decision, outstanding } => {
+                /* Illegal transition:  */
+                panic!("Received stamp response twice in a row?")
+            },
+            ClientState::CyclingKey { new_private_key, .. } => {
+                /* Handling these are quite trivial. */
+                if response.status() == StatusCode::OK {
+                    self.private_key = Some(new_private_key);
+                    self.state = Some(ClientState::Registered);
+                } else {
+                    /* Error: How do we want to handle this. */
+                }
+            }
+        }
+
+        Ok(())
+    }
+    fn return_poll_active_token(&mut self) -> Result<Poll<&GenericToken<D>>, FluidError> {
+        Ok(Poll::Ready(self.active_token.as_ref().unwrap().token()))
+    }
+    fn new_cycle_request<C>(&mut self, ctx: &C) -> Result<(), FluidError>
+    where 
+        C: ProtocolCtx<D>,
+        C::Protocol: Serialize
+    {
+        let protocol = ctx.protocol();
+        let (new_public_key, new_private_key) = KC::generate();
+        let request = form_cycle_request::<D, _, KC, String>(ctx.connection(), &protocol, self.id.unwrap(), &new_public_key, self.private_key.as_ref().unwrap(), &None)?;
+        let serialized = prep_request(request).or(Err(FluidError::FailedSerializingCycleRequest))?;
+
+        // Send the request.
+        self.transmit.push(serialized);
+
+        // Set the state to cycling.
+        self.state = Some(ClientState::CyclingKey { new_private_key, new_public_key });
+
+        Ok(())
+    }
+    fn poll_rcv_stamp_response<C>(&mut self, ctx: &C) -> Result<Poll<&GenericToken<D>>, FluidError>
+    where 
+        C: ProtocolCtx<D>,
+        C::Protocol: Serialize
+    {
+        if let ClientState::ReceivedStampResponse { decision, outstanding } = self.state.take().unwrap() {
+            /* We have received a response, we now will process it. */
+            match decision {
+                ExecResponse::Return { expiry } => {
+                    /* Success */
+                    self.active_token = Some(AliveToken::from_raw(outstanding, expiry));
+                    self.state = Some(ClientState::Registered);
+                    self.return_poll_active_token()
+                },
+                ExecResponse::Invalid(status) => {
+                    /* Invalid response? */
+                    unreachable!()
+                },
+                ExecResponse::CycleRequired => {
+                    self.new_cycle_request(ctx)?;
+                    Ok(Poll::Pending)
+                }
+            }
+        } else {
+            panic!("Erroneously called the poll receive stamp response.")
+        }
+    }   
     /// Gets the authorization token from the client.
-    pub fn get_token<T, P>(
+    pub fn poll_token<T, C>(
         &mut self,
-        conn: &Connection,
-        token_type: T,
-        token_protocol: P,
+        ctx: &C,
+        token_type: T
     ) -> Result<Poll<&GenericToken<D>>, FluidError>
     where
         T: FixedByteRepr<1>,
-        P: FixedByteRepr<1>,
+        C: ProtocolCtx<D>,
+        C::Protocol: FixedByteRepr<1>,
+        C::Protocol: Serialize
     {
-        match self.state {
-            ClientState::Idle => return Err(FluidError::ClientNotRegistered),
+        match &self.state.as_ref().unwrap() {
+            ClientState::Idle => return Err(FluidError::ClientNotRegisstered),
             ClientState::Registered => {
                 // If we are in the registered state we may have a valid token but this is not a certainty.
-                if self.is_current_valid() {
+                if self.is_current_valid(ctx) {
                     // Check to see if we can use our active protocol.
-                    Ok(Poll::Ready(self.active_token.as_ref().unwrap().token()))
+                    self.return_poll_active_token()
                 } else {
                     // We need to refresh it.
-                    self.new_tok_req(conn, token_type, token_protocol)?;
-                    self.state = ClientState::SendingToken;
+                    self.new_tok_req(ctx, token_type)?;
                     Ok(Poll::Pending)
                 }
+            }
+            ClientState::SendingToken { outstanding: _o } => {
+                /* If we are still in this state we cannot proceed */
+                Ok(Poll::Pending)
             },
-            ClientState::SendingToken => {
-                unreachable!()
+            ClientState::CyclingKey { .. } => {
+                /* We are in the process of cycling the key. */
+                Ok(Poll::Pending)
+            }
+            ClientState::ReceivedStampResponse { .. }=> {
+                self.poll_rcv_stamp_response(ctx)
             }
         }
-        
     }
 }
 
-
-
-
-
+/// Parse the stamp response into a usable set of data.
+fn parse_stamp_response<D>(raw: FullResponse) -> Result<ExecResponse<D>, FluidError>
+where
+    D: for<'de> Deserialize<'de>,
+{
+    if raw.status() == StatusCode::RESET_CONTENT {
+        // Needs a cycle.
+        Ok(ExecResponse::CycleRequired)
+    } else if raw.status() == StatusCode::CREATED {
+        // Created the token.
+        let ptr: PostTokenResponse<D> = raw
+            .parse_json()
+            .map_err(|e| FluidError::FailedDeserializingPtr(e))?;
+        Ok(ExecResponse::Return { expiry: ptr.expiry })
+    } else {
+        Ok(ExecResponse::Invalid(raw.status()))
+    }
+}
 
 /// Forms a cycle request as an HTTP reequest.
-/// 
+///
 /// This will automatically perform the necessary
 /// signing to generate a valid request.
-fn form_cycle_request<'a, D, S, P, KC: KeyChain, M>(
+fn form_cycle_request<'a, D, P, KC: KeyChain, M>(
     conn: &'a Connection,
     protocol: &'a P,
     id: Uuid,
@@ -609,7 +363,7 @@ fn form_token_post<'a, D, KC>(
     signature: &'a KC::Signature,
 ) -> Result<Request<TokenStampRequest<'a, D, KC>>, FluidError>
 where
-    KC: KeyChain
+    KC: KeyChain,
 {
     hyper::Request::builder()
         .method(hyper::Method::PUT)
@@ -617,41 +371,72 @@ where
         .header(header::CONTENT_TYPE, "application/json")
         .body(TokenStampRequest {
             token: B64Ref(token),
-            signature: B64Ref(signature)
+            signature: B64Ref(signature),
         })
         .or(Err(FluidError::FailedFormingTokenPostRequest))
 }
 
-pub async fn execute<S, IDF, E>(state: &mut S, functor: IDF) -> bool
-where
-    IDF: AsyncFn(&S) -> Result<bool, E>,
-{
-    let is_registered: bool = (functor)(&*state).await.or_else(|_| Err("ye")).unwrap();
 
-    true
-}
-pub enum Response<D> {
-    Return { token: GenericToken<D>, life: D },
+pub enum ExecResponse<D> {
+    Return { expiry: D },
     CycleRequired,
-    Invalid,
+    Invalid(StatusCode),
 }
 
 #[derive(Serialize)]
 pub struct Hello {
-    wow: String
+    wow: String,
 }
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, Utc};
     use http_body_util::{BodyExt, Empty, Full};
-    use hyper::{body::{self, Body, Bytes}, Method, Response};
+    use hyper::{
+        Method, Response,
+        body::{self, Body, Bytes},
+    };
     use hyper_tls::HttpsConnector;
     use hyper_util::{client::legacy::Client, rt::TokioExecutor};
     use rand::Rng;
     use serde_json::Value;
     use smol::net::TcpStream;
 
-    use crate::{protocol::{executor::{form_token_post, Connection, Hello}, http::NetworkClient}, testing::DummyClientSyncStruct, token::token::GenericToken};
+    use crate::{
+        protocol::{
+            config::Configuration,
+            error::FluidError,
+            executor::{ClientState, Connection, Hello, form_token_post},
+            http::NetworkClient,
+        },
+        testing::{
+            DummyClientSyncStruct, DummyKeyChain, ExampleProtocol, ExampleType, TestExecutor,
+            TestTimeStub,
+        },
+        token::token::GenericToken,
+    };
+
+    use super::{ClientProtocol, ProtocolCtx};
+
+    #[test]
+    pub fn test_token_request_transitions() {
+        let mut executor = ClientProtocol::<TestTimeStub, DummyKeyChain>::new();
+
+        let context = TestExecutor::generic();
+
+        assert!(matches!(executor.state.as_ref().unwrap(), ClientState::Idle));
+
+        assert_eq!(
+            executor
+                .poll_token(&context, ExampleType(0))
+                .err()
+                .unwrap()
+                .to_string(),
+            FluidError::ClientNotRegisstered.to_string()
+        );
+
+        // We will force the client into a registered state.
+    }
 
     #[tokio::test]
     pub async fn test_hyper() {
@@ -674,19 +459,19 @@ mod tests {
         //     uri: "https://echo.zuplo.io".parse().unwrap()
         // }, , signature)
 
-        let res: Response<Value> = client.request_json(hyper::Request::builder()
-            .method(Method::POST)
-            .uri("https://echo.zuplo.io")
-            .body(Hello {
-                wow: "yes".to_string()
-            }).unwrap()
-        ).await.unwrap();
+        let res: Response<Value> = client
+            .request_json(
+                hyper::Request::builder()
+                    .method(Method::POST)
+                    .uri("https://echo.zuplo.io")
+                    .body(Hello {
+                        wow: "yes".to_string(),
+                    })
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
-    
-
-
-       
-        
         assert_eq!(res.status(), 200);
 
         println!("BODY: {:?}", res.into_body());

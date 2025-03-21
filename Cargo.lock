@@ -279,6 +279,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -964,6 +965,7 @@ dependencies = [
  "base64",
  "chrono",
  "fips204",
+ "http",
  "http-body-util",
  "hyper",
  "hyper-tls",

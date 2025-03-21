@@ -32,7 +32,7 @@ where
     D: TimeObj
 {
     pub fn is_alive<C: ProtocolCtx<D>>(&self, ctx: &C) -> bool{
-        self.token.timestamp.seconds() + self.life.seconds() > ctx.current_time().seconds()
+        self.token.timestamp.seconds_since_epoch() + self.life.seconds_since_epoch() > ctx.current_time().seconds_since_epoch()
     }
 }
 
@@ -121,8 +121,8 @@ where
     where 
         E: ProtocolCtx<D>
     {
-        let ts = self.timestamp.seconds();
-        let es = executor.current_time().seconds();
+        let ts = self.timestamp.seconds_since_epoch();
+        let es = executor.current_time().seconds_since_epoch();
         let pad = executor.config().timeout();
 
         if ts > es {
@@ -217,9 +217,10 @@ where
 #[cfg(test)]
 mod tests {
     use arbitrary::Arbitrary;
+    use http::Uri;
     use sha3::{Digest, Sha3_256};
 
-    use crate::{protocol::config::Configuration, testing::{make_testing_token, ExampleProtocol, ExampleType, TestExecutor, TestTimeStub}};
+    use crate::{protocol::{config::Configuration, executor::Connection}, testing::{make_testing_token, ExampleProtocol, ExampleType, TestExecutor, TestTimeStub}};
 
     use super::FluidToken;
 
@@ -261,12 +262,8 @@ mod tests {
     pub fn test_basic_is_stampable_zero_timeout() {
         let token = make_testing_token(0);
 
-        let mut executor = TestExecutor {
-            configuration: Configuration {
-                stamping_timeout_secs: 0
-            },
-            internal_clock: 0
-        };
+        let mut executor = TestExecutor::generic();
+        executor.configuration.stamping_timeout_secs = 0;
 
         // This is stampable since the time is the same.
         assert!(token.is_stampable(&executor));
@@ -287,12 +284,8 @@ mod tests {
     pub fn test_basic_is_stampable_with_tolerance() {
         let token = make_testing_token(0);
 
-        let mut executor = TestExecutor {
-            configuration: Configuration {
-                stamping_timeout_secs: 5
-            },
-            internal_clock: 0
-        };
+        let mut executor = TestExecutor::generic();
+        executor.configuration.stamping_timeout_secs = 5;
 
         // This is stampable since the time is the same.
         assert!(token.is_stampable(&executor));

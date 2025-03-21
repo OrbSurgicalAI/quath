@@ -64,7 +64,7 @@ where
 #[derive(Deserialize)]
 pub struct PostTokenResponse<D>
 {
-    expiry: D
+    pub expiry: D
 }
 
 #[cfg(test)]

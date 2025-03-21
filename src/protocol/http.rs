@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use thiserror::Error;
 
+use super::error::FluidError;
+
 pub(crate) struct NetworkClient {
     client: Client<HttpsConnector<HttpConnector>, Full<Bytes>>,
 }
@@ -37,6 +39,7 @@ where
 
     Ok(modified)
 }
+
 
 impl NetworkClient {
     pub async fn new() -> Self {
