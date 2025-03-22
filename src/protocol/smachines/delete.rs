@@ -1,23 +1,21 @@
-use std::{marker::PhantomData, task::Poll, time::Duration};
+use std::{task::Poll, time::Duration};
 
-use http::{HeaderValue, StatusCode, header::AUTHORIZATION};
+use http::HeaderValue;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{
+use crate::
     protocol::{
         error::FluidError,
         executor::ProtocolCtx,
         http::prep_request,
-        spec::registry::SvcEntity,
         web::{
             body::FullResponse,
-            http::{form_service_entity_create_request, form_service_entity_deletion_request},
-            server::{create::RegisterVerdict, delete::DeletionVerdict, verdict::Verdict},
+            http::form_service_entity_deletion_request,
+            server::{delete::DeletionVerdict, verdict::Verdict},
         },
-    },
-    token::signature::KeyChain,
-};
+    }
+;
 
 use super::message::Message;
 
@@ -266,6 +264,55 @@ mod tests {
         }
 
     
+    }
+
+    #[test]
+    pub fn run_deletion_not_found() {
+        /* Tests a succesful run */
+
+        let id_to_delete = Uuid::new_v4();
+
+        let mut register_binding = DeletionBinding::new(id_to_delete, HeaderValue::from_static("Bearer 123"));
+        let context = TestExecutor::generic();
+
+        // We should not be ready yet.
+        assert!(register_binding.poll_deleted().is_pending());
+
+        // Check to see if we are transmitting the registraton.
+        let initial = register_binding.poll_transmit(&context).unwrap();
+        if let Some(Message::Request(req)) = initial {
+            assert_eq!(req.headers().get(AUTHORIZATION).unwrap(), "Bearer 123");
+        } else {
+            panic!("The register binding should have started by transmitting the request.");
+        }
+
+        // Verify the state is correct.
+        if let DeleteState::WaitingForServiceResponse = register_binding.state {
+        } else {
+            panic!(
+                "The service should have been waiting for a response yet that was not the state."
+            );
+        }
+
+        // The server approves it, this should be the end.
+        let server_resp = form_deletion_response(DeletionVerdict::NotFound).unwrap();
+        register_binding
+            .handle_input(&context, FullResponse::from_raw(server_resp))
+            .unwrap();
+
+        // Verify the state is correct.
+        if let DeleteState::NotFound = register_binding.state {
+        } else {
+            panic!("The service should have been completed by now but this was not the case..");
+        }
+
+        // Verify we can pull out the registration details.
+        let Poll::Ready(inner) = register_binding.poll_deleted() else {
+            panic!("The service was ready but did not yield any results.");
+            
+        };
+        // Since it was succesfully deleted, it should be returned here.
+        assert_eq!(inner, None);
     }
 
     #[test]

@@ -93,6 +93,7 @@ impl KeyChain for DummyKeyChain {
     }
 }
 
+#[derive(Clone)]
 pub struct DummyPrivate([u8; 8]);
 
 #[derive(Clone)]

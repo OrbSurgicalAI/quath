@@ -40,7 +40,7 @@ where
 }
 
 pub(crate) fn form_cycle_response(
-    verdict: CycleVerdict<'_>,
+    verdict: CycleVerdict,
 ) -> Result<Response<String>, FluidError> {
     let verdict: Verdict<()> = verdict.into();
     let code = verdict.code();

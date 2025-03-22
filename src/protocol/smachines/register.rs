@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, task::Poll, time::Duration};
+use std::{task::Poll, time::Duration};
 
 use http::{header::AUTHORIZATION, HeaderValue, StatusCode};
 use serde::Serialize;
@@ -213,6 +213,8 @@ mod tests {
 
     use super::RegisterBinding;
 
+   
+
     #[test]
     pub fn test_unrecoverable_registry_errors() {
 
@@ -220,7 +222,6 @@ mod tests {
         let mut register_binding: RegisterBinding<&str, DummyKeyChain> = RegisterBinding::generate("hello", HeaderValue::from_static("Bearer 123"));
         let context  = TestExecutor::generic();
 
-        let initial_id = register_binding.id();
 
         // We should not be ready yet.
         assert!(register_binding.get_registration().is_pending());
@@ -244,6 +245,61 @@ mod tests {
         assert!(register_binding.handle_input(&context, FullResponse::from_raw(server_resp)).is_err());
 
       
+
+        
+    }
+
+    #[test]
+    pub fn run_register_with_internal_server_error() {
+
+        /* Tests a succesful run */
+        let mut register_binding: RegisterBinding<&str, DummyKeyChain> = RegisterBinding::generate("hello", HeaderValue::from_static("Bearer 123"));
+        let context  = TestExecutor::generic();
+
+        let initial_id = register_binding.id();
+
+        // We should not be ready yet.
+        assert!(register_binding.get_registration().is_pending());
+
+        // Check to see if we are transmitting the registraton.
+        let initial = register_binding.poll_transmit(&context).unwrap();
+        if let Some(Message::Request(req)) = initial {
+            assert_eq!(req.headers().get(AUTHORIZATION).unwrap(), "Bearer 123");
+        } else {
+            panic!("The register binding should have started by transmitting the request.");
+        }
+
+        // Verify the state is correct.
+        if let RegisterState::WaitingForServiceResponse = register_binding.state {} else {
+            panic!("The service should have been waiting for a response yet that was not the state.");
+        }
+       
+        // The server approves it, this should be the end.
+        let server_resp = form_register_response(RegisterVerdict::InternalServerError).unwrap();
+        register_binding.handle_input(&context, FullResponse::from_raw(server_resp)).unwrap();
+
+        // Verify we have been put into a retries state.
+        if let RegisterState::Wait(_) = register_binding.state {} else {
+            panic!("The service should have been completed by now but this was not the case..");
+        }
+        
+        
+        // Make sure 
+        if let Some(Message::Wait(d)) = register_binding.poll_transmit(&context).unwrap() {
+            assert_eq!(d, context.retry_cooldown());
+        } else {
+            panic!("The registry binding should have returned a wait instruction but did not.")
+        }
+        
+        // Right here we would actually perform a real wait.
+
+        // Now we want to make sure the client was put back into the fresh state.
+        if let RegisterState::Fresh = register_binding.state {} else {
+            panic!("The client should have re-entered the fresh state.");
+        }
+        
+        // Make sure these are actually different.
+        assert_eq!(initial_id, register_binding.id());
 
         
     }
