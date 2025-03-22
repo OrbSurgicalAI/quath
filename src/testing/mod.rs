@@ -225,6 +225,7 @@ impl TestExecutor {
 
 impl ProtocolCtx<TestTimeStub> for TestExecutor {
     type Protocol = ExampleProtocol;
+    type TokenType = ExampleType;
     fn current_time(&self) -> TestTimeStub {
         TestTimeStub {
             seconds: self.internal_clock,
@@ -241,6 +242,9 @@ impl ProtocolCtx<TestTimeStub> for TestExecutor {
     }
     fn retry_cooldown(&self) -> std::time::Duration {
         Duration::from_secs(30)
+    }
+    fn get_token_type(&self) -> Self::TokenType {
+        ExampleType(0)
     }
 }
 

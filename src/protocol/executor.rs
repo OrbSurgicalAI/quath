@@ -31,12 +31,14 @@ use serde::{Deserialize, Serialize};
 /// Manages the context of the protocol.
 pub trait ProtocolCtx<D> {
     type Protocol;
+    type TokenType;
     /// Compares the current time against another time.
     fn current_time(&self) -> D;
     fn config(&self) -> &Configuration;
     fn connection(&self) -> &Connection;
     fn protocol(&self) -> Self::Protocol;
     fn retry_cooldown(&self) -> Duration;
+    fn get_token_type(&self) -> Self::TokenType;
 }
 
 pub trait TimeObj {
@@ -320,6 +322,7 @@ where
         }
     }
 }
+
 
 /// Parse the stamp response into a usable set of data.
 fn parse_stamp_response<D>(raw: FullResponse) -> Result<ExecResponse<D>, FluidError>
