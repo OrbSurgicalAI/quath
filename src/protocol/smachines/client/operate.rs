@@ -9,7 +9,7 @@ use crate::{
         spec::registry::SvcEntity,
         web::{body::FullResponse, container::rfc3339::Rfc3339},
     },
-    token::{signature::KeyChain, token::GenericToken},
+    token::{signature::KeyChain, token::TimestampToken},
 };
 
 use super::{
@@ -68,7 +68,7 @@ where
             InnerMachine::Token(key) => key.handle_input(ctx, response),
         }
     }
-    pub fn poll_result<C>(&mut self, ctx: &C) -> Poll<GenericToken<D>>
+    pub fn poll_result<C>(&mut self, ctx: &C) -> Poll<TimestampToken<D>>
     where
         C: ProtocolCtx<D>,
         D: TimeObj + Clone,
@@ -132,7 +132,7 @@ mod tests {
             executor::TimeObj, smachines::client::{message::Message, operate::InnerMachine}, spec::registry::SvcEntity, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}
         },
         testing::{DummyKeyChain, TestExecutor, TestTimeStub},
-        token::{signature::KeyChain, token::GenericToken},
+        token::{signature::KeyChain, token::TimestampToken},
     };
 
     use super::ClientMachine;
@@ -218,7 +218,7 @@ mod tests {
             .handle_input(
                 &ctx,
                 FullResponse::from_raw(form_post_token_response(TokenVerdict::Success {
-                    token: GenericToken::random_with_ts(TestTimeStub::from_millis_since_epoch(0)),
+                    token: TimestampToken::random_with_ts(TestTimeStub::from_millis_since_epoch(0)),
                     expiry: TestTimeStub::from_millis_since_epoch(1000)
                 }).unwrap()),
             )

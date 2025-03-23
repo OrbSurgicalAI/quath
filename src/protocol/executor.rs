@@ -14,7 +14,7 @@ use crate::{
     protocol::{http::prep_request, web::http::form_token_put},
     token::{
         signature::{KeyChain, PrivateKey},
-        token::{AliveToken, FluidToken, GenericToken},
+        token::{AliveToken, FluidToken, TimestampToken},
     },
 };
 
@@ -72,11 +72,11 @@ where
     Idle,
     Registered,
     SendingToken {
-        outstanding: GenericToken<D>
+        outstanding: TimestampToken<D>
     },
     ReceivedStampResponse {
         decision: ExecResponse<D>,
-        outstanding: GenericToken<D>
+        outstanding: TimestampToken<D>
     },
     CyclingKey {
         new_private_key: KC::Private,
@@ -160,7 +160,7 @@ where
         &mut self,
         ctx: &CTX,
         token_type: T
-    ) -> Result<(GenericToken<D>, KC::Signature), FluidError>
+    ) -> Result<(TimestampToken<D>, KC::Signature), FluidError>
     where
         T: FixedByteRepr<1>,
         CTX: ProtocolCtx<D>,
@@ -234,7 +234,7 @@ where
 
         Ok(())
     }
-    fn return_poll_active_token(&mut self) -> Result<Poll<&GenericToken<D>>, FluidError> {
+    fn return_poll_active_token(&mut self) -> Result<Poll<&TimestampToken<D>>, FluidError> {
         Ok(Poll::Ready(self.active_token.as_ref().unwrap().token()))
     }
     fn new_cycle_request<C>(&mut self, ctx: &C) -> Result<(), FluidError>
@@ -255,7 +255,7 @@ where
 
         Ok(())
     }
-    fn poll_rcv_stamp_response<C>(&mut self, ctx: &C) -> Result<Poll<&GenericToken<D>>, FluidError>
+    fn poll_rcv_stamp_response<C>(&mut self, ctx: &C) -> Result<Poll<&TimestampToken<D>>, FluidError>
     where 
         C: ProtocolCtx<D>,
         C::Protocol: Serialize
@@ -288,7 +288,7 @@ where
         &mut self,
         ctx: &C,
         token_type: T
-    ) -> Result<Poll<&GenericToken<D>>, FluidError>
+    ) -> Result<Poll<&TimestampToken<D>>, FluidError>
     where
         T: FixedByteRepr<1>,
         C: ProtocolCtx<D>,
@@ -347,7 +347,7 @@ where
 
 pub enum ExecResponse<D> {
     Return {
-        token: GenericToken<D>,
+        token: TimestampToken<D>,
         expiry: D
     },
     CycleRequired,
@@ -386,7 +386,7 @@ mod tests {
             DummyClientSyncStruct, DummyKeyChain, ExampleProtocol, ExampleType, TestExecutor,
             TestTimeStub,
         },
-        token::token::GenericToken,
+        token::token::TimestampToken,
     };
 
     use super::{ClientProtocol, ProtocolCtx};
@@ -410,9 +410,9 @@ mod tests {
         assert!(initial.is_pending());
 
         // We should be in the sending token state.
-        let inner_token: GenericToken<TestTimeStub>;
+        let inner_token: TimestampToken<TestTimeStub>;
         if let ClientState::SendingToken { outstanding } = executor.state.as_ref().unwrap() {
-            inner_token = GenericToken::try_from(outstanding.get_bytes().to_vec()).unwrap();
+            inner_token = TimestampToken::try_from(outstanding.get_bytes().to_vec()).unwrap();
         } else {
             panic!("The client was not in the sending token state after being polled!");
         }

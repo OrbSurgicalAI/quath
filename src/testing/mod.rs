@@ -11,7 +11,7 @@ use crate::{
     protocol::{
         config::Configuration, error::FluidError, executor::{Connection, ExecResponse, FixedByteRepr, ProtocolCtx, TimeObj}, web::container::rfc3339::{Rfc3339, Rfc3339Str}
     },
-    token::{signature::{KeyChain, PrivateKey, PublicKey, Signature}, token::{AliveToken, FluidToken, GenericToken}},
+    token::{signature::{KeyChain, PrivateKey, PublicKey, Signature}, token::{AliveToken, FluidToken, TimestampToken}},
 };
 
 

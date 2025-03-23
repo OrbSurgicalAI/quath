@@ -7,20 +7,20 @@ use uuid::Uuid;
 use crate::protocol::{error::FluidError, executor::{FixedByteRepr, ProtocolCtx, TimeObj}};
 
 
-
+const UUID_RANGE: Range<usize> = 2..18;
 const TIMESTAMP_RANGE: Range<usize> = 34..42;
 
 pub struct AliveToken<D> {
-    token: GenericToken<D>,
+    token: TimestampToken<D>,
     life: D
 }
 
 
 impl<D> AliveToken<D> {
-    pub fn from_raw(token: GenericToken<D>, life: D) -> AliveToken<D> {
+    pub fn from_raw(token: TimestampToken<D>, life: D) -> AliveToken<D> {
         AliveToken { token, life }
     }
-    pub fn token(&self) -> &GenericToken<D> {
+    pub fn token(&self) -> &TimestampToken<D> {
         &self.token
     }
     pub fn life(&self) -> &D {
@@ -47,20 +47,43 @@ pub struct FluidToken<D, T, P> {
     body: [u8; 32]
 }
 
-pub struct GenericToken<D> {
+pub struct TimestampToken<D> {
     timestamp: D,
     data: [u8; 74]
 }
 
 
-impl<D> AsRef<[u8]> for GenericToken<D> {
+pub struct GenericToken([u8; 74]);
+
+impl GenericToken {
+    pub fn get_uuid_field(&self) -> [u8; 16] {
+        self.0[UUID_RANGE].try_into().unwrap()
+    }
+    pub fn get_time_field(&self) -> [u8; 8] {
+        self.0[TIMESTAMP_RANGE].try_into().unwrap()
+    }
+}
+
+impl GenericToken {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl<D> TimestampToken<D> {
+    pub fn generic(self) -> GenericToken {
+        GenericToken(self.data)
+    }
+}
+
+impl<D> AsRef<[u8]> for TimestampToken<D> {
     fn as_ref(&self) -> &[u8] {
         &self.data
     }
 }
 
 
-impl GenericToken<()> {
+impl TimestampToken<()> {
     pub fn random() -> Self {
         Self {
             timestamp: (),
@@ -70,7 +93,7 @@ impl GenericToken<()> {
     
 }
 
-impl<D> GenericToken<D>
+impl<D> TimestampToken<D>
 where 
     D: FixedByteRepr<8>
 {
@@ -85,7 +108,7 @@ where
     
 }
 
-impl<D> GenericToken<D> {
+impl<D> TimestampToken<D> {
     pub fn timestamp(&self) -> &D {
         &self.timestamp
     }
@@ -98,7 +121,7 @@ impl<D> GenericToken<D> {
     }
 }
 
-impl<D: Clone> Clone for GenericToken<D> {
+impl<D: Clone> Clone for TimestampToken<D> {
     fn clone(&self) -> Self {
         Self {
             timestamp: self.timestamp.clone(),
@@ -107,7 +130,7 @@ impl<D: Clone> Clone for GenericToken<D> {
     }
 }
 
-impl<D> TryFrom<Vec<u8>> for GenericToken<D>
+impl<D> TryFrom<Vec<u8>> for TimestampToken<D>
 where 
     D: FixedByteRepr<8>
 {
@@ -214,9 +237,9 @@ where
     T: FixedByteRepr<1>,
     P: FixedByteRepr<1>
 {
-    pub fn generic(self) -> GenericToken<D> {
+    pub fn generic(self) -> TimestampToken<D> {
         let data = self.to_bytes();
-        GenericToken { timestamp: self.timestamp, data }
+        TimestampToken { timestamp: self.timestamp, data }
     }
     pub fn to_bytes(&self) -> [u8; 74] {
         let mut buffer = [0u8; 74];

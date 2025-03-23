@@ -14,7 +14,7 @@ use crate::{
             body::FullResponse, container::rfc3339::Rfc3339, http::{form_cycle_request, form_service_entity_create_request, form_token_put}, payload::PostTokenResponse, server::{create::RegisterVerdict, cycle::CycleVerdict, verdict::Verdict}
         },
     },
-    token::{signature::{KeyChain, PrivateKey}, token::{AliveToken, FluidToken, GenericToken}},
+    token::{signature::{KeyChain, PrivateKey}, token::{AliveToken, FluidToken, TimestampToken}},
 };
 
 use super::message::Message;
@@ -28,7 +28,7 @@ enum TokenState<D>
     Wait(Duration),
     /// We are waiting for the registry service response.
     WaitingForTokenConfirmation {
-        pending: GenericToken<D>
+        pending: TimestampToken<D>
     },
 
     CycleRequired
@@ -67,7 +67,7 @@ where
     fn gen_token_and_sign<CTX>(
         &mut self,
         ctx: &CTX
-    ) -> Result<(GenericToken<D>, KC::Signature), FluidError>
+    ) -> Result<(TimestampToken<D>, KC::Signature), FluidError>
     where
         CTX::TokenType: FixedByteRepr<1>,
         CTX: ProtocolCtx<D>,
@@ -225,7 +225,7 @@ impl<D> TokenPoll<'_, D> {
 
 pub enum ExecResponse<D> {
     Return {
-        token: GenericToken<D>,
+        token: TimestampToken<D>,
         expiry: D
     },
     CycleRequired,
@@ -266,7 +266,7 @@ mod tests {
 
    
 
-    use crate::{protocol::{executor::{ProtocolCtx, TimeObj}, smachines::client::{message::Message, token::{TokenPoll, TokenState}}, spec::registry::SvcEntity, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}}, testing::{DummyKeyChain, TestExecutor, TestTimeStub}, token::{signature::KeyChain, token::GenericToken}};
+    use crate::{protocol::{executor::{ProtocolCtx, TimeObj}, smachines::client::{message::Message, token::{TokenPoll, TokenState}}, spec::registry::SvcEntity, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}}, testing::{DummyKeyChain, TestExecutor, TestTimeStub}, token::{signature::KeyChain, token::TimestampToken}};
 
     use super::TokenBinding;
 
@@ -395,7 +395,7 @@ mod tests {
         }
 
         // Verify the state is correct.
-        let mut pending_token: GenericToken<TestTimeStub>;
+        let mut pending_token: TimestampToken<TestTimeStub>;
         if let Some(TokenState::WaitingForTokenConfirmation { pending }) = &register_binding.state {
             pending_token = pending.clone();
         } else {

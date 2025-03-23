@@ -10,7 +10,7 @@ use crate::{
     protocol::{error::FluidError, executor::Connection},
     token::{
         signature::{KeyChain, PrivateKey, PublicKey},
-        token::GenericToken,
+        token::TimestampToken,
     },
 };
 
@@ -115,7 +115,7 @@ where
 /// Forms a token posting request.
 pub(crate) fn form_token_put<'a, D, KC>(
     conn: &'a Connection,
-    token: &'a GenericToken<D>,
+    token: &'a TimestampToken<D>,
     signature: &'a KC::Signature,
 ) -> Result<Request<TokenStampRequest<'a, D, KC>>, FluidError>
 where

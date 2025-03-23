@@ -1,7 +1,7 @@
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::token::{signature::KeyChain, token::GenericToken};
+use crate::token::{signature::KeyChain, token::TimestampToken};
 
 use super::container::{b64::{B64Owned, B64Ref}, rfc3339::{Rfc3339, Rfc3339Container, Rfc3339Str}};
 use crate::protocol::executor::FixedByteRepr;
@@ -63,7 +63,7 @@ pub struct TokenStampRequest<'a, D, KC>
 where 
     KC: KeyChain
 {
-    pub token: B64Ref<'a, GenericToken<D>>,
+    pub token: B64Ref<'a, TimestampToken<D>>,
     pub signature: B64Ref<'a, KC::Signature>
 }
 
@@ -89,7 +89,7 @@ pub struct PostTokenResponse<D>
 {
     #[serde(bound(serialize = ""))]
     #[serde(bound(deserialize = "D: FixedByteRepr<8>"))]
-    pub token: B64Owned<GenericToken<D>>,
+    pub token: B64Owned<TimestampToken<D>>,
     #[serde(bound(deserialize = "D: Rfc3339"))]
     #[serde(bound(serialize = "D: Rfc3339"))]
     pub expiry: Rfc3339Container<D>
@@ -102,7 +102,7 @@ mod tests {
     use serde::Serialize;
     use uuid::Uuid;
 
-    use crate::{protocol::web::{container::b64::{B64Owned, B64Ref}, payload::CycleRequest}, testing::{DummyKeyChain, DummySignature, ExampleProtocol}, token::{signature::{KeyChain, Signature}, token::GenericToken}};
+    use crate::{protocol::web::{container::b64::{B64Owned, B64Ref}, payload::CycleRequest}, testing::{DummyKeyChain, DummySignature, ExampleProtocol}, token::{signature::{KeyChain, Signature}, token::TimestampToken}};
 
     use super::TokenStampRequest;
 
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     pub fn serialize_token_stamp_integrity() {
 
-        let token = GenericToken::random();
+        let token = TimestampToken::random();
         let dummy_sig = DummySignature::random();
 
         let wow: TokenStampRequest<'_, (), DummyKeyChain> = TokenStampRequest {
@@ -135,7 +135,7 @@ mod tests {
             a: u8
         }
 
-        let token = GenericToken::random();
+        let token = TimestampToken::random();
         let dummy_sig = DummySignature::random();
         let (pubk, privk) = DummyKeyChain::generate();
         let protocol = "hello";

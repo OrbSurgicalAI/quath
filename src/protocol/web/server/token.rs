@@ -1,6 +1,6 @@
 use http::StatusCode;
 
-use crate::{protocol::web::{container::{b64::B64Owned, rfc3339::{Rfc3339, Rfc3339Container}}, payload::PostTokenResponse}, token::token::GenericToken};
+use crate::{protocol::web::{container::{b64::B64Owned, rfc3339::{Rfc3339, Rfc3339Container}}, payload::PostTokenResponse}, token::token::TimestampToken};
 
 use super::verdict::Verdict;
 pub enum TokenVerdict<'a, D> {
@@ -19,7 +19,7 @@ pub enum TokenVerdict<'a, D> {
     /// and the client should retry.
     InternalServerError,
     /// The token was succesfully created.
-    Success { token: GenericToken<D>, expiry: D },
+    Success { token: TimestampToken<D>, expiry: D },
     /// There is already a token that exists with this identity
     Conflict 
 }
