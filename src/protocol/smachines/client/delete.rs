@@ -157,11 +157,9 @@ mod tests {
 
     use crate::{
         protocol::{
-            executor::ProtocolCtx,
-            smachines::{delete::DeleteState, message::Message},
-            web::{
+            executor::ProtocolCtx, smachines::client::{delete::DeleteState, message::Message}, web::{
                 body::FullResponse, http::{form_deletion_response, form_register_response}, server::{create::RegisterVerdict, delete::DeletionVerdict},
-            },
+            }
         },
         testing::{DummyKeyChain, TestExecutor},
     };

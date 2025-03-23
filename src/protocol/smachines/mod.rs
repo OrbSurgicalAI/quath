@@ -1,5 +1,2 @@
-pub mod register;
-pub mod message;
-pub mod delete;
-pub mod cycle;
-pub mod token;
+pub mod client;
+pub mod server;

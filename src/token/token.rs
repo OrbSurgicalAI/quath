@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, fmt::Debug, ops::Deref};
+use std::{cmp::Ordering, fmt::Debug, ops::{Deref, Range}};
 
 use rand::{Rng, RngCore};
 use sha3::{Digest, Sha3_256};
@@ -7,6 +7,8 @@ use uuid::Uuid;
 use crate::protocol::{error::FluidError, executor::{FixedByteRepr, ProtocolCtx, TimeObj}};
 
 
+
+const TIMESTAMP_RANGE: Range<usize> = 34..42;
 
 pub struct AliveToken<D> {
     token: GenericToken<D>,
@@ -50,6 +52,7 @@ pub struct GenericToken<D> {
     data: [u8; 74]
 }
 
+
 impl<D> AsRef<[u8]> for GenericToken<D> {
     fn as_ref(&self) -> &[u8] {
         &self.data
@@ -67,8 +70,25 @@ impl GenericToken<()> {
     
 }
 
-impl<D> GenericToken<D> {
+impl<D> GenericToken<D>
+where 
+    D: FixedByteRepr<8>
+{
+    pub fn random_with_ts(stamp: D) -> Self{
+        let mut body: [u8; 74] = rand::rng().random();
+        body[TIMESTAMP_RANGE].copy_from_slice(&stamp.to_fixed_repr());
+        Self {
+            timestamp: stamp,
+            data: body
+        }
+    }
+    
+}
 
+impl<D> GenericToken<D> {
+    pub fn timestamp(&self) -> &D {
+        &self.timestamp
+    }
     pub fn get_bytes(&self) -> &[u8; 74] {
         &self.data
     }
@@ -204,7 +224,7 @@ where
         buffer[1] = self.token_type.to_fixed_repr()[0];
         buffer[2..18].copy_from_slice(&self.id.to_bytes_le());
         buffer[18..34].copy_from_slice(&self.permissions);
-        buffer[34..42].copy_from_slice(&self.timestamp.to_fixed_repr());
+        buffer[TIMESTAMP_RANGE].copy_from_slice(&self.timestamp.to_fixed_repr());
         buffer[42..].copy_from_slice(&self.body);
         buffer
     }

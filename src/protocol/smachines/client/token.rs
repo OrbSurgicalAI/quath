@@ -146,7 +146,7 @@ where
     pub fn handle_input<C>(&mut self, ctx: &C, response: FullResponse) -> Result<(), FluidError>
     where
         C: ProtocolCtx<D>,
-        D: FixedByteRepr<8>
+        D: FixedByteRepr<8> + TimeObj
     {
         match self.state.take().unwrap() {
             TokenState::Fresh => {
@@ -160,8 +160,11 @@ where
                 match result {
                     ExecResponse::Return { token, expiry } => {
                         // TODO: Verify fields line up.
-                        println!("Returned: {:?}", token.get_bytes());
+                        println!("Returned: {:?} {:?}", token.get_bytes(), expiry.to_rfc3339().to_string());
+                        println!("Wow {} {}", token.timestamp().seconds_since_epoch() + expiry.seconds_since_epoch(), ctx.current_time().seconds_since_epoch());
                         self.token = Some(AliveToken::from_raw(token, expiry));
+                        println!("IsVALID: {:?}", self.is_current_valid(ctx));
+                        
                         self.state = Some(TokenState::Fresh);
                     },
                     ExecResponse::Recoverable => {
@@ -263,7 +266,7 @@ mod tests {
 
    
 
-    use crate::{protocol::{executor::{ProtocolCtx, TimeObj}, smachines::{message::Message, token::{TokenPoll, TokenState}}, spec::registry::SvcEntity, web::{body::FullResponse, http::{form_cycle_response, form_post_token_response, form_token_put}, server::{cycle::CycleVerdict, token::TokenVerdict}}}, testing::{DummyKeyChain, TestExecutor, TestTimeStub}, token::{signature::KeyChain, token::GenericToken}};
+    use crate::{protocol::{executor::{ProtocolCtx, TimeObj}, smachines::client::{message::Message, token::{TokenPoll, TokenState}}, spec::registry::SvcEntity, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}}, testing::{DummyKeyChain, TestExecutor, TestTimeStub}, token::{signature::KeyChain, token::GenericToken}};
 
     use super::TokenBinding;
 

@@ -34,6 +34,9 @@ impl Rfc3339Str {
         }
 
     }
+    pub fn to_string(self) -> String {
+        self.0
+    }
 }
 
 

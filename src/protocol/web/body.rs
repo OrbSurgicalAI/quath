@@ -10,6 +10,9 @@ pub struct FullResponse {
 
 
 impl FullResponse {
+    pub fn dummy_with_status(code: StatusCode) -> Result<Self, http::Error> {
+        Ok(Self::from_parts(Response::builder().status(code).body(())?.into_parts().0, Bytes::default()))
+    }
     pub fn status(&self) -> StatusCode {
         self.parts.status
     }
@@ -18,6 +21,9 @@ impl FullResponse {
     }
     pub fn bytes(&self) -> &Bytes {
         &self.received
+    }
+    pub fn from_parts(parts: Parts, rvc: Bytes) -> Self {
+        Self { parts, received: rvc }
     }
     pub fn from_raw<O>(resp: Response<O>) -> FullResponse
     where 

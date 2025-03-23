@@ -158,28 +158,7 @@ where
     }
 }
 
-fn parse_initial_service_response(response: FullResponse) -> Result<RegisterVerdict, FluidError> {
-    if response.status() == StatusCode::CREATED {
-        /* The entity was created, operation succesful! */
-        Ok(RegisterVerdict::Success)
-    } else if response.status() == StatusCode::INTERNAL_SERVER_ERROR {
-        /* The server had a problem */
-        Ok(RegisterVerdict::InternalServerError)
-    } else if response.status() == StatusCode::CONFLICT {
-        /* This ID is in use. */
-        Ok(RegisterVerdict::Conflict {
-            conflicting_id: Uuid::nil(),
-        })
-    } else if response.status() == StatusCode::NOT_IMPLEMENTED {
-        /* The requested protocol is not implemented on the server. */
-        Ok(RegisterVerdict::NotImplemented(String::new()))
-    } else if response.status() == StatusCode::UNPROCESSABLE_ENTITY {
-        /* The request was malformed. */
-        Ok(RegisterVerdict::KeyProcessError)
-    } else {
-        Err(FluidError::CreationResponseMalformed)
-    }
-}
+
 
 #[cfg(test)]
 mod tests {
@@ -190,7 +169,7 @@ mod tests {
 
    
 
-    use crate::{protocol::{executor::ProtocolCtx, smachines::{cycle::CycleState, message::Message}, spec::registry::SvcEntity, web::{body::FullResponse, http::form_cycle_response, server::cycle::CycleVerdict}}, testing::{DummyKeyChain, TestExecutor}, token::signature::KeyChain};
+    use crate::{protocol::{executor::ProtocolCtx, smachines::client::{cycle::CycleState, message::Message}, spec::registry::SvcEntity, web::{body::FullResponse, http::form_cycle_response, server::cycle::CycleVerdict}}, testing::{DummyKeyChain, TestExecutor}, token::signature::KeyChain};
 
     use super::CycleBinding;
 

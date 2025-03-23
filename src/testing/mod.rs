@@ -210,7 +210,8 @@ pub struct TestExecutor {
     pub internal_clock: i64,
     pub configuration: Configuration,
     pub connection: Connection,
-    pub protocol: ExampleProtocol
+    pub protocol: ExampleProtocol,
+    pub retry_cooldown: Duration
 }
 impl TestExecutor {
     pub fn generic() -> Self {
@@ -218,7 +219,8 @@ impl TestExecutor {
             internal_clock: 0,
             configuration: Configuration { stamping_timeout_secs: 30 },
             connection: Connection::from_uri(Uri::from_static("https://www.google.com")),
-            protocol: ExampleProtocol(0)
+            protocol: ExampleProtocol(0),
+            retry_cooldown: Duration::from_secs(0)
         }
     }
 }
@@ -241,7 +243,7 @@ impl ProtocolCtx<TestTimeStub> for TestExecutor {
         self.protocol.clone()
     }
     fn retry_cooldown(&self) -> std::time::Duration {
-        Duration::from_secs(30)
+        self.retry_cooldown
     }
     fn get_token_type(&self) -> Self::TokenType {
         ExampleType(0)

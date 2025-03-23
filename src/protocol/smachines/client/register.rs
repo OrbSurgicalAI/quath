@@ -209,7 +209,7 @@ mod tests {
     use http::{header::AUTHORIZATION, HeaderValue};
     use uuid::Uuid;
 
-    use crate::{protocol::{executor::ProtocolCtx, smachines::{message::Message, register::RegisterState}, web::{body::FullResponse, http::form_register_response, server::create::RegisterVerdict}}, testing::{DummyKeyChain, TestExecutor}};
+    use crate::{protocol::{executor::ProtocolCtx, smachines::client::{message::Message, register::RegisterState}, web::{body::FullResponse, http::form_register_response, server::create::RegisterVerdict}}, testing::{DummyKeyChain, TestExecutor}};
 
     use super::RegisterBinding;
 
