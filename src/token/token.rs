@@ -1,5 +1,6 @@
 use std::{cmp::Ordering, fmt::Debug, ops::{Deref, Range}};
 
+use chrono::{DateTime, Utc};
 use rand::{Rng, RngCore};
 use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
@@ -10,45 +11,43 @@ use crate::protocol::{error::FluidError, executor::{FixedByteRepr, ProtocolCtx, 
 const UUID_RANGE: Range<usize> = 2..18;
 const TIMESTAMP_RANGE: Range<usize> = 34..42;
 
-pub struct AliveToken<D> {
-    token: TimestampToken<D>,
-    life: D
+pub struct AliveToken {
+    token: TimestampToken,
+    life: DateTime<Utc>
 }
 
 
-impl<D> AliveToken<D> {
-    pub fn from_raw(token: TimestampToken<D>, life: D) -> AliveToken<D> {
+impl AliveToken {
+    pub fn from_raw(token: TimestampToken, life: DateTime<Utc>) -> AliveToken {
         AliveToken { token, life }
     }
-    pub fn token(&self) -> &TimestampToken<D> {
+    pub fn token(&self) -> &TimestampToken {
         &self.token
     }
-    pub fn life(&self) -> &D {
+    pub fn life(&self) -> &DateTime<Utc> {
         &self.life
     }
     
 }
 
-impl<D> AliveToken<D>
-where
-    D: TimeObj
+impl AliveToken
 {
-    pub fn is_alive<C: ProtocolCtx<D>>(&self, ctx: &C) -> bool{
+    pub fn is_alive<C: ProtocolCtx>(&self, ctx: &C) -> bool{
         self.token.timestamp.seconds_since_epoch() + self.life.seconds_since_epoch() > ctx.current_time().seconds_since_epoch()
     }
 }
 
-pub struct FluidToken<D, T, P> {
+pub struct FluidToken<T, P> {
     protocol: P,
     token_type: T,
     id: Uuid,
     permissions: [u8; 16],
-    timestamp: D,
+    timestamp: DateTime<Utc>,
     body: [u8; 32]
 }
 
-pub struct TimestampToken<D> {
-    timestamp: D,
+pub struct TimestampToken {
+    timestamp: DateTime<Utc>,
     data: [u8; 74]
 }
 
@@ -62,6 +61,11 @@ impl GenericToken {
     pub fn get_time_field(&self) -> [u8; 8] {
         self.0[TIMESTAMP_RANGE].try_into().unwrap()
     }
+    pub fn hash(&self) -> [u8; 32] {
+        let mut hasher = Sha3_256::new();
+        hasher.update(self.as_bytes());
+        hasher.finalize().into()
+    }
 }
 
 impl GenericToken {
@@ -70,34 +74,32 @@ impl GenericToken {
     }
 }
 
-impl<D> TimestampToken<D> {
+impl TimestampToken {
     pub fn generic(self) -> GenericToken {
         GenericToken(self.data)
     }
 }
 
-impl<D> AsRef<[u8]> for TimestampToken<D> {
+impl AsRef<[u8]> for TimestampToken {
     fn as_ref(&self) -> &[u8] {
         &self.data
     }
 }
 
 
-impl TimestampToken<()> {
+impl TimestampToken {
     pub fn random() -> Self {
         Self {
-            timestamp: (),
+            timestamp: DateTime::from_timestamp_nanos(0),
             data: rand::rng().random()
         }
     }
     
 }
 
-impl<D> TimestampToken<D>
-where 
-    D: FixedByteRepr<8>
+impl TimestampToken
 {
-    pub fn random_with_ts(stamp: D) -> Self{
+    pub fn random_with_ts(stamp: DateTime<Utc>) -> Self{
         let mut body: [u8; 74] = rand::rng().random();
         body[TIMESTAMP_RANGE].copy_from_slice(&stamp.to_fixed_repr());
         Self {
@@ -108,8 +110,8 @@ where
     
 }
 
-impl<D> TimestampToken<D> {
-    pub fn timestamp(&self) -> &D {
+impl TimestampToken {
+    pub fn timestamp(&self) -> &DateTime<Utc> {
         &self.timestamp
     }
     pub fn get_bytes(&self) -> &[u8; 74] {
@@ -121,7 +123,7 @@ impl<D> TimestampToken<D> {
     }
 }
 
-impl<D: Clone> Clone for TimestampToken<D> {
+impl Clone for TimestampToken {
     fn clone(&self) -> Self {
         Self {
             timestamp: self.timestamp.clone(),
@@ -130,16 +132,14 @@ impl<D: Clone> Clone for TimestampToken<D> {
     }
 }
 
-impl<D> TryFrom<Vec<u8>> for TimestampToken<D>
-where 
-    D: FixedByteRepr<8>
+impl TryFrom<Vec<u8>> for TimestampToken
 {
     type Error = FluidError;
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
         assert_eq!(value.len(), 74);
 
         let timestamp: [u8; 8] = value[34..42].try_into().or(Err(FluidError::FailedDeserTimestamp))?;
-        let time = D::from_fixed_repr(timestamp);
+        let time = DateTime::<Utc>::from_fixed_repr(timestamp);
         Ok(Self {
             data: value.try_into().or(Err(FluidError::FailedDeserBody))?,
             timestamp: time
@@ -155,9 +155,8 @@ where
 // }
 
 
-impl<D, T, P> PartialEq for FluidToken<D, T, P>
-where 
-    D: PartialEq,
+impl<T, P> PartialEq for FluidToken<T, P>
+where
     T: PartialEq,
     P: PartialEq
 {
@@ -171,9 +170,8 @@ where
     }
 }
 
-impl<D, T, P> Debug for FluidToken<D, T, P>
-where 
-    D: Debug,
+impl<T, P> Debug for FluidToken<T, P>
+where
     T: Debug,
     P: Debug
 {
@@ -182,36 +180,35 @@ where
     }
 }
 
-impl<D, T, P> FluidToken<D, T, P>
-where 
-    D: TimeObj + FixedByteRepr<8>,
-    T: FixedByteRepr<1>,
-    P: FixedByteRepr<1>
-{
-    /// Checks if a token can be stamped.
-    pub fn is_stampable<E>(&self, executor: &E) -> bool
-    where 
-        E: ProtocolCtx<D>
-    {
-        let ts = self.timestamp.seconds_since_epoch();
-        let es = executor.current_time().seconds_since_epoch();
-        let pad = executor.config().timeout();
+// impl<T, P> FluidToken<T, P>
+// where
+//     T: FixedByteRepr<1>,
+//     P: FixedByteRepr<1>
+// {
+//     /// Checks if a token can be stamped.
+//     pub fn is_stampable<E>(&self, executor: &E) -> bool
+//     where 
+//         E: ProtocolCtx
+//     {
+//         let ts = self.timestamp.seconds_since_epoch();
+//         let es = executor.current_time().seconds_since_epoch();
+//         let pad = executor.config().timeout();
 
-        if ts > es {
-            // The timestamp is in the future.
-            false
-        } else if ts < es && ts.abs_diff(es) > pad {
-            // The timestamp is in the past more than the threshold.
-            false
-        } else {
-            true
-        }
-    }
-}
+//         if ts > es {
+//             // The timestamp is in the future.
+//             false
+//         } else if ts < es && ts.abs_diff(es) > pad {
+//             // The timestamp is in the past more than the threshold.
+//             false
+//         } else {
+//             true
+//         }
+//     }
+// }
 
-impl<D, T, P> FluidToken<D, T, P>
+impl<T, P> FluidToken<T, P>
 {
-    pub fn from_raw(protocol: P, token_type: T, id: Uuid, timestamp: D, body: [u8; 32], permissions: [u8; 16]) -> Self {
+    pub fn from_raw(protocol: P, token_type: T, id: Uuid, timestamp: DateTime<Utc>, body: [u8; 32], permissions: [u8; 16]) -> Self {
         Self {
             protocol,
             token_type,
@@ -222,7 +219,7 @@ impl<D, T, P> FluidToken<D, T, P>
 
         }
     }
-    pub fn generate<C: ProtocolCtx<D>>(context: &C, id: Uuid, token_type: T, protocol: P) -> FluidToken<D, T, P> {
+    pub fn generate<C: ProtocolCtx>(context: &C, id: Uuid, token_type: T, protocol: P) -> FluidToken<T, P> {
         Self::from_raw(protocol, token_type, id, context.current_time(), rand::rng().random(), [0u8; 16])
     }
     pub fn get_id(&self) -> Uuid {
@@ -231,13 +228,12 @@ impl<D, T, P> FluidToken<D, T, P>
     
 }
 
-impl<D, T, P> FluidToken<D, T, P>
-where 
-    D: FixedByteRepr<8>,
+impl<T, P> FluidToken<T, P>
+where
     T: FixedByteRepr<1>,
     P: FixedByteRepr<1>
 {
-    pub fn generic(self) -> TimestampToken<D> {
+    pub fn generic(self) -> TimestampToken {
         let data = self.to_bytes();
         TimestampToken { timestamp: self.timestamp, data }
     }
@@ -256,7 +252,7 @@ where
         let token_type = T::from_fixed_repr([ buffer[1] ]);
         let id = Uuid::from_bytes_le(buffer[2..18].try_into().or(Err(FluidError::FailedDeserializingId))?);
         let permissions = buffer[18..34].try_into().or(Err(FluidError::FailedDeserializingPermissions))?;
-        let timestamp = D::from_fixed_repr(buffer[34..42].try_into().or(Err(FluidError::FailedDeserTimestamp))?);
+        let timestamp = DateTime::<Utc>::from_fixed_repr(buffer[34..42].try_into().or(Err(FluidError::FailedDeserTimestamp))?);
         let body = buffer[42..].try_into().or(Err(FluidError::FailedDeserBody))?;
         
 
@@ -270,9 +266,8 @@ where
         })
 
     }
-    pub fn cmp_bytes<D2, T2, P2>(&self, other: &FluidToken<D2, T2, P2>) -> Ordering
+    pub fn cmp_bytes<T2, P2>(&self, other: &FluidToken<T2, P2>) -> Ordering
     where 
-        D2: TimeObj + FixedByteRepr<8>,
         T2: FixedByteRepr<1>,
         P2: FixedByteRepr<1>
     {
@@ -288,11 +283,14 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use arbitrary::Arbitrary;
+    use chrono::{Date, DateTime};
     use http::Uri;
     use sha3::{Digest, Sha3_256};
 
-    use crate::{protocol::{config::Configuration, executor::Connection}, testing::{make_testing_token, ExampleProtocol, ExampleType, TestExecutor, TestTimeStub}};
+    use crate::{protocol::{config::Configuration, executor::Connection}, testing::{make_testing_token, ExampleProtocol, ExampleType, TestExecutor, TestTimeStub}, token::tolerance::TokenTolerance};
 
     use super::FluidToken;
 
@@ -300,11 +298,13 @@ mod tests {
     #[test]
     pub fn test_token_serde_bytes() {
         arbtest::arbtest(|u| {
-            let token: FluidToken<TestTimeStub, ExampleType, ExampleProtocol> = FluidToken::arbitrary(u)?;
+            let token: FluidToken<ExampleType, ExampleProtocol> = FluidToken::arbitrary(u)?;
 
-            let reserialized: FluidToken<TestTimeStub, ExampleType, ExampleProtocol> = FluidToken::from_bytes(token.to_bytes()).unwrap();
+            let wow = token.to_bytes();
+
+            let reserialized: FluidToken<ExampleType, ExampleProtocol> = FluidToken::from_bytes(token.to_bytes()).unwrap();
             
-            assert_eq!(token, reserialized);
+            assert_eq!(token.to_bytes(), reserialized.to_bytes());
 
             Ok(())
         });
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     pub fn test_token_hash_consistency() {
         arbtest::arbtest(|u| {
-            let token: FluidToken<TestTimeStub, ExampleType, ExampleProtocol> = FluidToken::arbitrary(u)?;
+            let token: FluidToken<ExampleType, ExampleProtocol> = FluidToken::arbitrary(u)?;
 
             let mut bytes = Sha3_256::new();
             bytes.update(&token.to_bytes());
@@ -332,23 +332,25 @@ mod tests {
     /// This tests that the protocol functions when there is zero padding.
     #[test]
     pub fn test_basic_is_stampable_zero_timeout() {
-        let token = make_testing_token(0);
 
-        let mut executor = TestExecutor::generic();
-        executor.configuration.stamping_timeout_secs = 0;
+        let tolerance = TokenTolerance::new(Duration::ZERO, Duration::ZERO);
+
+        let mut current_time = DateTime::from_timestamp_millis(0).unwrap();
+
+        let token = make_testing_token(0).generic().generic();
 
         // This is stampable since the time is the same.
-        assert!(token.is_stampable(&executor));
+        assert!(tolerance.check(&token, current_time));
 
 
         // Future tokens should not be stampable.
-        let token = make_testing_token(10);
-        assert!(!token.is_stampable(&executor));
+        let token = make_testing_token(10).generic().generic();
+        assert!(!tolerance.check(&token, current_time));
 
         // Check that past tokens are not stampable since the timeout is zero (zero tolerance policy)
-        executor.internal_clock += 10;
-        let token = make_testing_token(0);
-        assert!(!token.is_stampable(&executor));
+        current_time += Duration::from_millis(10);
+        let token = make_testing_token(0).generic().generic();
+        assert!(!tolerance.check(&token, current_time));
     }
 
     /// This tests that the protocol functions when there is some tolerance.
@@ -356,22 +358,25 @@ mod tests {
     pub fn test_basic_is_stampable_with_tolerance() {
         let token = make_testing_token(0);
 
-        let mut executor = TestExecutor::generic();
-        executor.configuration.stamping_timeout_secs = 5;
+
+        let mut clock = DateTime::from_timestamp_millis(0).unwrap();
+
+        let tolerance = TokenTolerance::new(Duration::from_millis(5), Duration::ZERO);
 
         // This is stampable since the time is the same.
-        assert!(token.is_stampable(&executor));
+        assert!(tolerance.check(&token.generic().generic(), clock));
 
 
         // Future tokens should not be stampable.
         let token = make_testing_token(10);
-        assert!(!token.is_stampable(&executor));
+        assert!(!tolerance.check(&token.generic().generic(), clock));
+
 
         // Check that past tokens are not stampable since the timeout is zero (zero tolerance policy)
-        executor.internal_clock += 10;
+        clock += Duration::from_millis(10);
         let token = make_testing_token(0);
-        assert!(!token.is_stampable(&executor));
-        assert!(make_testing_token(5).is_stampable(&executor));
+        assert!(!tolerance.check(&token.generic().generic(), clock));
+        assert!(tolerance.check(&make_testing_token(5).generic().generic(), clock));
     }
     
 }

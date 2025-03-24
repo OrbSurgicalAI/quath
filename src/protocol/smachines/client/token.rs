@@ -1,5 +1,6 @@
 use std::{task::Poll, time::Duration};
 
+use chrono::{DateTime, Utc};
 use http::{HeaderValue, StatusCode, header::AUTHORIZATION};
 use serde::{Serialize, de};
 use uuid::Uuid;
@@ -19,7 +20,7 @@ use crate::{
 
 use super::message::Message;
 
-enum TokenState<D>
+enum TokenState
 {
     /// This is a fresh pair of credentials and thus we need to
     /// run through the registration protocol.
@@ -28,7 +29,7 @@ enum TokenState<D>
     Wait(Duration),
     /// We are waiting for the registry service response.
     WaitingForTokenConfirmation {
-        pending: TimestampToken<D>
+        pending: TimestampToken
     },
 
     CycleRequired
@@ -37,19 +38,18 @@ enum TokenState<D>
 /// This is the protocol executor for when we want to register with the server.
 /// 
 /// NOTE: This binding is fused, meaning that it CAN be reused.
-pub struct TokenBinding<M, KC, D>
+pub struct TokenBinding<M, KC>
 where
     KC: KeyChain,
 {
     details: SvcEntity<KC, M>,
-    token: Option<AliveToken<D>>,
-    state: Option<TokenState<D>>
+    token: Option<AliveToken>,
+    state: Option<TokenState>
 }
 
-impl<M, KC, D> TokenBinding<M, KC, D>
+impl<M, KC> TokenBinding<M, KC>
 where
-    KC: KeyChain,
-    D: Rfc3339
+    KC: KeyChain
 {
     pub fn from_svc_entity(details: SvcEntity<KC, M>) -> Self {
         Self {
@@ -67,15 +67,14 @@ where
     fn gen_token_and_sign<CTX>(
         &mut self,
         ctx: &CTX
-    ) -> Result<(TimestampToken<D>, KC::Signature), FluidError>
+    ) -> Result<(TimestampToken, KC::Signature), FluidError>
     where
         CTX::TokenType: FixedByteRepr<1>,
-        CTX: ProtocolCtx<D>,
+        CTX: ProtocolCtx,
         CTX::Protocol: FixedByteRepr<1>,
-        D: FixedByteRepr<8>
     {
         let token =
-            FluidToken::<D, CTX::TokenType, CTX::Protocol>::generate(ctx, self.details.id, ctx.get_token_type(), ctx.protocol());
+            FluidToken::<CTX::TokenType, CTX::Protocol>::generate(ctx, self.details.id, ctx.get_token_type(), ctx.protocol());
         let signature = self
             .details
             .private
@@ -87,8 +86,7 @@ where
     /// Checks if the current token is valid.
     pub fn is_current_valid<CTX>(&self, ctx: &CTX) -> bool
     where
-        CTX: ProtocolCtx<D>,
-        D: TimeObj
+        CTX: ProtocolCtx
     {
         if let Some(token) = &self.token {
             token.is_alive(ctx)
@@ -99,10 +97,9 @@ where
     /// This polls the registry binding for a transmission.
     pub fn poll_transmit<C>(&mut self, ctx: &C) -> Result<Option<Message>, FluidError>
     where
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
         M: Serialize,
         C::Protocol: Serialize + FixedByteRepr<1>,
-        D: FixedByteRepr<8> + TimeObj,
         C::TokenType: FixedByteRepr<1>
     {
         match &self.state.as_ref().unwrap() {
@@ -114,7 +111,7 @@ where
                     Ok(None)
                 } else {
                     let (token, signature) = self.gen_token_and_sign(ctx)?;
-                    let form = form_token_put::<D, KC>(ctx.connection(), &token, &signature)?;
+                    let form = form_token_put::<KC>(ctx.connection(), &token, &signature)?;
                     let serialized = prep_request(form).or(Err(FluidError::FailedFormingTokenPostRequest))?;
 
 
@@ -145,8 +142,7 @@ where
     }
     pub fn handle_input<C>(&mut self, ctx: &C, response: FullResponse) -> Result<(), FluidError>
     where
-        C: ProtocolCtx<D>,
-        D: FixedByteRepr<8> + TimeObj
+        C: ProtocolCtx
     {
         match self.state.take().unwrap() {
             TokenState::Fresh => {
@@ -155,7 +151,7 @@ where
             }
             TokenState::WaitingForTokenConfirmation { .. } => {
                 /* If we receive input here it is almost ceraintly the servers response */
-                let result: ExecResponse<D> = parse_stamp_response(response)?;
+                let result: ExecResponse = parse_stamp_response(response)?;
               
                 match result {
                     ExecResponse::Return { token, expiry } => {
@@ -192,10 +188,9 @@ where
         }
         Ok(())
     }
-    pub fn poll_result<C>(&mut self, ctx: &C) -> TokenPoll<'_, D>
+    pub fn poll_result<C>(&mut self, ctx: &C) -> TokenPoll<'_>
     where 
-        C: ProtocolCtx<D>,
-        D: TimeObj
+        C: ProtocolCtx
     {
         if let Some(TokenState::CycleRequired) = self.state {
             TokenPoll::CycleRequired
@@ -207,13 +202,13 @@ where
     }
 }
 
-pub enum TokenPoll<'a, D> {
-    Ready(&'a AliveToken<D>),
+pub enum TokenPoll<'a> {
+    Ready(&'a AliveToken),
     CycleRequired,
     Pending
 }
 
-impl<D> TokenPoll<'_, D> {
+impl TokenPoll<'_> {
     pub fn is_pending(&self) -> bool {
         if let Self::Pending = self {
             true
@@ -223,10 +218,10 @@ impl<D> TokenPoll<'_, D> {
     }
 }
 
-pub enum ExecResponse<D> {
+pub enum ExecResponse {
     Return {
-        token: TimestampToken<D>,
-        expiry: D
+        token: TimestampToken,
+        expiry: DateTime<Utc>
     },
     CycleRequired,
     Recoverable,
@@ -235,9 +230,7 @@ pub enum ExecResponse<D> {
 
 
 /// Parse the stamp response into a usable set of data.
-fn parse_stamp_response<D>(raw: FullResponse) -> Result<ExecResponse<D>, FluidError>
-where
-    D: Rfc3339 + FixedByteRepr<8>
+fn parse_stamp_response(raw: FullResponse) -> Result<ExecResponse, FluidError>
 {
     if raw.status() == StatusCode::RESET_CONTENT {
         // Needs a cycle.
@@ -246,7 +239,7 @@ where
         Ok(ExecResponse::Recoverable)
     } else if raw.status() == StatusCode::CREATED {
         // Created the token.
-        let ptr: PostTokenResponse<D> = raw
+        let ptr: PostTokenResponse<DateTime<Utc>> = raw
             .parse_json()
             .map_err(|e| FluidError::FailedDeserializingPtr(e))?;
         Ok(ExecResponse::Return { token: ptr.token.inner(), expiry: ptr.expiry.inner() })
@@ -261,6 +254,7 @@ where
 mod tests {
     use std::task::Poll;
 
+    use chrono::DateTime;
     use http::{HeaderValue, header::AUTHORIZATION};
     use uuid::Uuid;
 
@@ -275,7 +269,7 @@ mod tests {
         /* Tests a succesful run */
 
         let (_, privk) = DummyKeyChain::generate();
-        let mut register_binding: TokenBinding<&str, DummyKeyChain, TestTimeStub> = TokenBinding::from_svc_entity(SvcEntity {
+        let mut register_binding: TokenBinding<&str, DummyKeyChain> = TokenBinding::from_svc_entity(SvcEntity {
             id: Uuid::new_v4(),
             metadata: Some("hello"),
             private: privk
@@ -302,7 +296,7 @@ mod tests {
 
         // We send something the registry binding cannot recover from, this
         // should cause an error to be thrown here.
-        let server_resp = form_post_token_response::<TestTimeStub>(TokenVerdict::BadTokenFormat).unwrap();
+        let server_resp = form_post_token_response(TokenVerdict::BadTokenFormat).unwrap();
         assert!(
             register_binding
                 .handle_input(&context, FullResponse::from_raw(server_resp))
@@ -314,7 +308,7 @@ mod tests {
     pub fn test_recoverable_token_post_error() {
         /* Tests a succesful run */
         let (_, privk) = DummyKeyChain::generate();
-        let mut register_binding: TokenBinding<&str, DummyKeyChain, TestTimeStub> = TokenBinding::from_svc_entity(SvcEntity {
+        let mut register_binding: TokenBinding<&str, DummyKeyChain> = TokenBinding::from_svc_entity(SvcEntity {
             id: Uuid::new_v4(),
             metadata: Some("hello"),
             private: privk
@@ -342,7 +336,7 @@ mod tests {
         }
 
         // The server approves it, this should be the end.
-        let server_resp = form_post_token_response::<TestTimeStub>(TokenVerdict::InternalServerError).unwrap();
+        let server_resp = form_post_token_response(TokenVerdict::InternalServerError).unwrap();
         register_binding
             .handle_input(&context, FullResponse::from_raw(server_resp))
             .unwrap();
@@ -377,7 +371,7 @@ mod tests {
     pub fn run_token_post_succesful() {
         /* Tests a succesful run */
         let (_, privk) = DummyKeyChain::generate();
-        let mut register_binding: TokenBinding<&str, DummyKeyChain, TestTimeStub> = TokenBinding::from_svc_entity(SvcEntity {
+        let mut register_binding: TokenBinding<&str, DummyKeyChain> = TokenBinding::from_svc_entity(SvcEntity {
             id: Uuid::new_v4(),
             metadata: Some("hello"),
             private: privk.clone()
@@ -395,7 +389,7 @@ mod tests {
         }
 
         // Verify the state is correct.
-        let mut pending_token: TimestampToken<TestTimeStub>;
+        let mut pending_token: TimestampToken;
         if let Some(TokenState::WaitingForTokenConfirmation { pending }) = &register_binding.state {
             pending_token = pending.clone();
         } else {
@@ -411,7 +405,7 @@ mod tests {
         // println!("Modified: {:?}", pending_token.get_bytes());
 
         // The server approves it, this should be the end.
-        let server_resp = form_post_token_response(TokenVerdict::Success { token: pending_token.clone().randomize_body(), expiry: TestTimeStub::from_millis_since_epoch(100) }).unwrap();
+        let server_resp = form_post_token_response(TokenVerdict::Success { token: pending_token.clone().randomize_body(), expiry: DateTime::from_millis_since_epoch(100) }).unwrap();
         register_binding
             .handle_input(&context, FullResponse::from_raw(server_resp))
             .unwrap();

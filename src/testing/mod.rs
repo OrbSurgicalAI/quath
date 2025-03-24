@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 use arbitrary::Arbitrary;
-use chrono::DateTime;
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use http::Uri;
 use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,6 @@ use crate::{
 
 
 
-type DummyToken = AliveToken<TestTimeStub>;
 
 
 pub struct FauxDummyServer {
@@ -27,7 +26,7 @@ pub struct DummyClientSyncStruct {
     context: TestExecutor,
     id: Option<Uuid>,
     private_key: Option<DummyPrivate>,
-    current_token: Option<DummyToken>,
+    current_token: Option<AliveToken>,
 
     faux_server: FauxDummyServer
 
@@ -122,7 +121,7 @@ pub struct TestTimeStub {
 
 impl Rfc3339 for TestTimeStub {
     type Error = chrono::ParseError;
-    fn parse_from_rfc3339(candidate: &str) -> Result<Self, Self::Error> {
+    fn parse_rfc3339(candidate: &str) -> Result<Self, Self::Error> {
         Ok(Self { seconds: DateTime::parse_from_rfc3339(candidate)?.timestamp_millis() })
     }
     fn to_rfc3339(&self) -> crate::protocol::web::container::rfc3339::Rfc3339Str {
@@ -174,9 +173,8 @@ impl FixedByteRepr<8> for TestTimeStub {
     }
 }
 
-impl<'a, D, T, P> Arbitrary<'a> for FluidToken<D, T, P>
+impl<'a, T, P> Arbitrary<'a> for FluidToken<T, P>
 where
-    D: Arbitrary<'a> + FixedByteRepr<8> + TimeObj,
     T: Arbitrary<'a> + FixedByteRepr<1>,
     P: Arbitrary<'a> + FixedByteRepr<1>,
 {
@@ -185,7 +183,7 @@ where
             P::arbitrary(u)?,
             T::arbitrary(u)?,
             Uuid::from_bytes_le(<[u8; 16]>::arbitrary(u)?),
-            D::arbitrary(u)?,
+            DateTime::arbitrary(u)?,
             <[u8; 32]>::arbitrary(u)?,
             <[u8; 16]>::arbitrary(u)?,
         ))
@@ -194,12 +192,12 @@ where
 
 pub(crate) fn make_testing_token(
     time: i64,
-) -> FluidToken<TestTimeStub, ExampleType, ExampleProtocol> {
+) -> FluidToken<ExampleType, ExampleProtocol> {
     let token = FluidToken::from_raw(
         ExampleProtocol(0),
         ExampleType(0),
         Uuid::new_v4(),
-        TestTimeStub { seconds: time },
+        DateTime::from_millis_since_epoch(time),
         [0u8; 32],
         [0u8; 16],
     );
@@ -225,13 +223,11 @@ impl TestExecutor {
     }
 }
 
-impl ProtocolCtx<TestTimeStub> for TestExecutor {
+impl ProtocolCtx for TestExecutor {
     type Protocol = ExampleProtocol;
     type TokenType = ExampleType;
-    fn current_time(&self) -> TestTimeStub {
-        TestTimeStub {
-            seconds: self.internal_clock,
-        }
+    fn current_time(&self) -> DateTime<Utc> {
+        DateTime::from_timestamp_millis(self.internal_clock).unwrap()
     }
     fn config(&self) -> &crate::protocol::config::Configuration {
         &self.configuration
@@ -247,6 +243,9 @@ impl ProtocolCtx<TestTimeStub> for TestExecutor {
     }
     fn get_token_type(&self) -> Self::TokenType {
         ExampleType(0)
+    }
+    fn issue_expiry(&self) -> DateTime<Utc> {
+        self.current_time() + Duration::from_secs(50)
     }
 }
 

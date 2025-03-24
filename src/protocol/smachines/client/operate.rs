@@ -18,25 +18,24 @@ use super::{
     token::{TokenBinding, TokenPoll},
 };
 
-enum InnerMachine<KC, M, D>
+enum InnerMachine<KC, M>
 where
     KC: KeyChain,
 {
-    Token(TokenBinding<M, KC, D>),
+    Token(TokenBinding<M, KC>),
     Key(CycleBinding<M, KC>),
 }
 
-pub struct ClientMachine<KC, M, D>
+pub struct ClientMachine<KC, M>
 where
     KC: KeyChain,
 {
-    inner: Option<InnerMachine<KC, M, D>>,
+    inner: Option<InnerMachine<KC, M>>,
 }
 
-impl<KC, M, D> ClientMachine<KC, M, D>
+impl<KC, M> ClientMachine<KC, M>
 where
     KC: KeyChain,
-    D: Rfc3339,
 {
     pub fn from_svc_entity(details: SvcEntity<KC, M>) -> Self {
         Self {
@@ -45,10 +44,9 @@ where
     }
     pub fn poll_transmit<C>(&mut self, ctx: &C) -> Result<Option<Message>, FluidError>
     where
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
         M: Serialize,
         C::Protocol: Serialize + FixedByteRepr<1>,
-        D: FixedByteRepr<8> + TimeObj,
         C::TokenType: FixedByteRepr<1>,
     {
         match self.inner.as_mut().unwrap() {
@@ -58,20 +56,18 @@ where
     }
     pub fn handle_input<C>(&mut self, ctx: &C, response: FullResponse) -> Result<(), FluidError>
     where
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
         M: Serialize,
-        C::Protocol: Serialize + FixedByteRepr<1>,
-        D: FixedByteRepr<8> + TimeObj,
+        C::Protocol: Serialize + FixedByteRepr<1>
     {
         match self.inner.as_mut().unwrap() {
             InnerMachine::Key(key) => key.handle_input(ctx, response),
             InnerMachine::Token(key) => key.handle_input(ctx, response),
         }
     }
-    pub fn poll_result<C>(&mut self, ctx: &C) -> Poll<TimestampToken<D>>
+    pub fn poll_result<C>(&mut self, ctx: &C) -> Poll<TimestampToken>
     where
-        C: ProtocolCtx<D>,
-        D: TimeObj + Clone,
+        C: ProtocolCtx,
     {
         match self.inner.take().unwrap() {
             InnerMachine::Token(mut key) => {
@@ -119,6 +115,7 @@ where
 mod tests {
     use std::time::Duration;
 
+    use chrono::DateTime;
     use http::{
         Extensions, HeaderMap, Method, StatusCode, Version,
         response::{Builder, Parts},
@@ -140,7 +137,7 @@ mod tests {
     #[test]
     pub fn client_machine_basic_check() {
         let (_, private) = DummyKeyChain::generate();
-        let mut binding: ClientMachine<DummyKeyChain, &str, TestTimeStub> =
+        let mut binding: ClientMachine<DummyKeyChain, &str> =
             ClientMachine::from_svc_entity(SvcEntity {
                 id: Uuid::nil(),
                 metadata: Some("Whats up"),
@@ -218,8 +215,8 @@ mod tests {
             .handle_input(
                 &ctx,
                 FullResponse::from_raw(form_post_token_response(TokenVerdict::Success {
-                    token: TimestampToken::random_with_ts(TestTimeStub::from_millis_since_epoch(0)),
-                    expiry: TestTimeStub::from_millis_since_epoch(1000)
+                    token: TimestampToken::random_with_ts(DateTime::from_millis_since_epoch(0)),
+                    expiry: DateTime::from_millis_since_epoch(1000)
                 }).unwrap()),
             )
             .unwrap();

@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use chrono::DateTime;
+use chrono::{DateTime, FixedOffset, ParseError, Utc};
 use serde::{de::Visitor, Deserialize, Serialize};
 
 
@@ -17,9 +17,20 @@ impl<D> Rfc3339Container<D> {
 pub trait Rfc3339: Sized {
     type Error: core::error::Error;
     fn to_rfc3339(&self) -> Rfc3339Str;
-    fn parse_from_rfc3339(candidate: &str) -> Result<Self, Self::Error>;
+    fn parse_rfc3339(candidate: &str) -> Result<Self, Self::Error>;
 }
 
+
+impl Rfc3339 for DateTime<Utc> {
+    type Error = ParseError;
+
+    fn parse_rfc3339(candidate: &str) -> Result<Self, Self::Error> {
+        DateTime::<FixedOffset>::parse_from_rfc3339(candidate).map(|d| d.to_utc())
+    }
+    fn to_rfc3339(&self) -> Rfc3339Str {
+        Rfc3339Str(self.to_rfc3339())
+    }
+}
 pub struct Rfc3339Str(String);
 
 
@@ -90,7 +101,7 @@ fn visit_str_inner<'a, O>(candidate: &'a str) -> Result<Rfc3339Container<O>, <O 
 where 
     O: Rfc3339
 {
-    let decoded = O::parse_from_rfc3339(candidate)?;
+    let decoded = O::parse_rfc3339(candidate)?;
     Ok(Rfc3339Container(decoded))
 }
 

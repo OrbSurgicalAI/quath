@@ -70,9 +70,9 @@ where
         self.id
     }
     /// This polls the registry binding for a transmission.
-    pub fn poll_transmit<C, D>(&mut self, ctx: &C) -> Result<Option<Message>, FluidError>
+    pub fn poll_transmit<C>(&mut self, ctx: &C) -> Result<Option<Message>, FluidError>
     where
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
         M: Serialize,
         C::Protocol: Serialize,
     {
@@ -83,7 +83,7 @@ where
                 let mut request: http::Request<
                     crate::protocol::web::payload::CreateServiceEntityRequest<
                         '_,
-                        <C as ProtocolCtx<D>>::Protocol,
+                        <C as ProtocolCtx>::Protocol,
                         M,
                         KC,
                     >,
@@ -124,9 +124,9 @@ where
             }
         }
     }
-    pub fn handle_input<C, D>(&mut self, ctx: &C, response: FullResponse) -> Result<(), FluidError>
+    pub fn handle_input<C>(&mut self, ctx: &C, response: FullResponse) -> Result<(), FluidError>
     where
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
     {
         match &self.state {
             RegisterState::Fresh => { /* In this state we are not expecting any output. */ }

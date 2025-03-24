@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-chrono = { version = "0.4.40", features = ["serde"] }
+chrono = { version = "0.4.40", features = ["arbitrary", "serde"] }
 fips204 = "0.4.6"
 
 sha3 = "0.10.8"

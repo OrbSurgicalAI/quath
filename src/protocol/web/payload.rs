@@ -59,15 +59,15 @@ where
 }
 
 
-pub struct TokenStampRequest<'a, D, KC>
+pub struct TokenStampRequest<'a, KC>
 where 
     KC: KeyChain
 {
-    pub token: B64Ref<'a, TimestampToken<D>>,
+    pub token: B64Ref<'a, TimestampToken>,
     pub signature: B64Ref<'a, KC::Signature>
 }
 
-impl<'a, D, KC> Serialize for TokenStampRequest<'a, D, KC>
+impl<'a, KC> Serialize for TokenStampRequest<'a, KC>
 where 
     KC: KeyChain
 {
@@ -88,8 +88,8 @@ where
 pub struct PostTokenResponse<D>
 {
     #[serde(bound(serialize = ""))]
-    #[serde(bound(deserialize = "D: FixedByteRepr<8>"))]
-    pub token: B64Owned<TimestampToken<D>>,
+    // #[serde(bound(deserialize = "D: FixedByteRepr<8>"))]
+    pub token: B64Owned<TimestampToken>,
     #[serde(bound(deserialize = "D: Rfc3339"))]
     #[serde(bound(serialize = "D: Rfc3339"))]
     pub expiry: Rfc3339Container<D>
@@ -113,7 +113,7 @@ mod tests {
         let token = TimestampToken::random();
         let dummy_sig = DummySignature::random();
 
-        let wow: TokenStampRequest<'_, (), DummyKeyChain> = TokenStampRequest {
+        let wow: TokenStampRequest<'_, DummyKeyChain> = TokenStampRequest {
             token: B64Ref(&token),
             signature: B64Ref(&dummy_sig)
         };

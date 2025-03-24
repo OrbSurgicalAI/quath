@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use http::{
     header::{self, AUTHORIZATION, CONTENT_TYPE}, HeaderValue, Method, Request, Response, StatusCode
 };
@@ -23,13 +24,11 @@ use super::{
     server::{create::RegisterVerdict, cycle::CycleVerdict, delete::DeletionVerdict, token::TokenVerdict, verdict::Verdict},
 };
 
-pub(crate) fn form_post_token_response<D>(
-    verdict: TokenVerdict<'_, D>,
+pub(crate) fn form_post_token_response(
+    verdict: TokenVerdict<'_>,
 ) -> Result<Response<String>, FluidError>
-where
-    D: Rfc3339,
 {
-    let verdict: Verdict<PostTokenResponse<D>> = verdict.into();
+    let verdict: Verdict<PostTokenResponse<DateTime<Utc>>> = verdict.into();
     let code = verdict.code();
 
     Response::builder()
@@ -82,7 +81,7 @@ pub(crate) fn form_deletion_response(
 ///
 /// This will automatically perform the necessary
 /// signing to generate a valid request.
-pub(crate) fn form_cycle_request<'a, D, P, KC: KeyChain, M>(
+pub(crate) fn form_cycle_request<'a, P, KC: KeyChain, M>(
     conn: &'a Connection,
     protocol: &'a P,
     id: Uuid,
@@ -113,11 +112,11 @@ where
 }
 
 /// Forms a token posting request.
-pub(crate) fn form_token_put<'a, D, KC>(
+pub(crate) fn form_token_put<'a, KC>(
     conn: &'a Connection,
-    token: &'a TimestampToken<D>,
+    token: &'a TimestampToken,
     signature: &'a KC::Signature,
-) -> Result<Request<TokenStampRequest<'a, D, KC>>, FluidError>
+) -> Result<Request<TokenStampRequest<'a, KC>>, FluidError>
 where
     KC: KeyChain,
 {

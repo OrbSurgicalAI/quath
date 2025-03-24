@@ -61,9 +61,9 @@ where
         self.details.as_ref().unwrap()
     }
     /// This polls the registry binding for a transmission.
-    pub fn poll_transmit<C, D>(&mut self, ctx: &C) -> Result<Option<Message>, FluidError>
+    pub fn poll_transmit<C>(&mut self, ctx: &C) -> Result<Option<Message>, FluidError>
     where
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
         M: Serialize,
         C::Protocol: Serialize,
     {
@@ -75,7 +75,7 @@ where
 
                 let (new_public, new_private ) = KC::generate();
 
-                let mut request = form_cycle_request::<D, C::Protocol, KC, M>(ctx.connection(), &protocol, details.id, &new_public, &details.private, &details.metadata)?;
+                let mut request = form_cycle_request::<C::Protocol, KC, M>(ctx.connection(), &protocol, details.id, &new_public, &details.private, &details.metadata)?;
 
           
                 /* Prepare this request, we will pass it to the caller to send out. */
@@ -102,9 +102,9 @@ where
             }
         }
     }
-    pub fn handle_input<C, D>(&mut self, ctx: &C, response: FullResponse) -> Result<(), FluidError>
+    pub fn handle_input<C>(&mut self, ctx: &C, response: FullResponse) -> Result<(), FluidError>
     where
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
     {
         match self.state.take().unwrap() {
             CycleState::Fresh => {

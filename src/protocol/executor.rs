@@ -29,16 +29,18 @@ use super::{
 use serde::{Deserialize, Serialize};
 
 /// Manages the context of the protocol.
-pub trait ProtocolCtx<D> {
+pub trait ProtocolCtx {
     type Protocol;
     type TokenType;
+    
     /// Compares the current time against another time.
-    fn current_time(&self) -> D;
+    fn current_time(&self) -> DateTime<Utc>;
     fn config(&self) -> &Configuration;
     fn connection(&self) -> &Connection;
     fn protocol(&self) -> Self::Protocol;
     fn retry_cooldown(&self) -> Duration;
     fn get_token_type(&self) -> Self::TokenType;
+    fn issue_expiry(&self) -> DateTime<Utc>;
 }
 
 pub trait TimeObj {
@@ -58,25 +60,36 @@ impl TimeObj for DateTime<Utc> {
     }
 }
 
+
+
 pub trait FixedByteRepr<const N: usize> {
     fn to_fixed_repr(&self) -> [u8; N];
     fn from_fixed_repr(val: [u8; N]) -> Self;
 }
 
+impl FixedByteRepr<8> for DateTime<Utc> {
+    fn to_fixed_repr(&self) -> [u8; 8] {
+        self.timestamp_millis().to_le_bytes()
+    }
+    fn from_fixed_repr(val: [u8; 8]) -> Self {
+        DateTime::from_timestamp_millis(i64::from_le_bytes(val)).unwrap()
+    }
+}
+
 pub struct Registered;
 
-enum ClientState<KC, D>
+enum ClientState<KC>
 where 
     KC: KeyChain
 {
     Idle,
     Registered,
     SendingToken {
-        outstanding: TimestampToken<D>
+        outstanding: TimestampToken
     },
     ReceivedStampResponse {
-        decision: ExecResponse<D>,
-        outstanding: TimestampToken<D>
+        decision: ExecResponse,
+        outstanding: TimestampToken
     },
     CyclingKey {
         new_private_key: KC::Private,
@@ -87,14 +100,14 @@ where
 
 
 type Container<D> = Option<D>;
-pub struct ClientProtocol<D, KC>
+pub struct ClientProtocol<KC>
 where
     KC: KeyChain,
 {
     id: Option<Uuid>,
     private_key: Option<KC::Private>,
-    active_token: Option<AliveToken<D>>,
-    state: Container<ClientState<KC, D>>,
+    active_token: Option<AliveToken>,
+    state: Container<ClientState<KC>>,
     transmit: Vec<Request<Full<Bytes>>>,
 }
 
@@ -117,10 +130,9 @@ impl Connection {
     }
 }
 
-impl<D, KC> ClientProtocol<D, KC>
+impl<KC> ClientProtocol<KC>
 where
-    D: TimeObj + FixedByteRepr<8> + Rfc3339,
-    KC: KeyChain,
+    KC: KeyChain
 {
     pub fn new() -> Self {
         Self {
@@ -146,7 +158,7 @@ where
     /// Checks if the current token is valid.
     pub fn is_current_valid<CTX>(&self, ctx: &CTX) -> bool
     where
-        CTX: ProtocolCtx<D>,
+        CTX: ProtocolCtx
     {
         if let Some(token) = &self.active_token {
             token.is_alive(ctx)
@@ -160,14 +172,14 @@ where
         &mut self,
         ctx: &CTX,
         token_type: T
-    ) -> Result<(TimestampToken<D>, KC::Signature), FluidError>
+    ) -> Result<(TimestampToken, KC::Signature), FluidError>
     where
         T: FixedByteRepr<1>,
-        CTX: ProtocolCtx<D>,
+        CTX: ProtocolCtx,
         CTX::Protocol: FixedByteRepr<1>
     {
         let token =
-            FluidToken::<D, T, CTX::Protocol>::generate(ctx, self.id.unwrap(), token_type, ctx.protocol());
+            FluidToken::<T, CTX::Protocol>::generate(ctx, self.id.unwrap(), token_type, ctx.protocol());
         let signature = self
             .private_key
             .as_ref()
@@ -190,13 +202,13 @@ where
     ) -> Result<(), FluidError>
     where
         T: FixedByteRepr<1>,
-        CTX: ProtocolCtx<D>,
+        CTX: ProtocolCtx,
         CTX::Protocol: FixedByteRepr<1>
     {
         // We should be in the registered state when sending this out.
         assert!(matches!(self.state.as_ref().unwrap(), ClientState::Registered));
         let (token, signature) = self.gen_token_and_sign(ctx, token_type)?;
-        let form = form_token_put::<D, KC>(ctx.connection(), &token, &signature)?;
+        let form = form_token_put::<KC>(ctx.connection(), &token, &signature)?;
         let serialized = prep_request(form).or(Err(FluidError::SerdeError))?;
 
         // Enqueue this request.
@@ -234,17 +246,17 @@ where
 
         Ok(())
     }
-    fn return_poll_active_token(&mut self) -> Result<Poll<&TimestampToken<D>>, FluidError> {
+    fn return_poll_active_token(&mut self) -> Result<Poll<&TimestampToken>, FluidError> {
         Ok(Poll::Ready(self.active_token.as_ref().unwrap().token()))
     }
     fn new_cycle_request<C>(&mut self, ctx: &C) -> Result<(), FluidError>
     where 
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
         C::Protocol: Serialize
     {
         let protocol = ctx.protocol();
         let (new_public_key, new_private_key) = KC::generate();
-        let request = form_cycle_request::<D, _, KC, String>(ctx.connection(), &protocol, self.id.unwrap(), &new_public_key, self.private_key.as_ref().unwrap(), &None)?;
+        let request = form_cycle_request::<_, KC, String>(ctx.connection(), &protocol, self.id.unwrap(), &new_public_key, self.private_key.as_ref().unwrap(), &None)?;
         let serialized = prep_request(request).or(Err(FluidError::FailedSerializingCycleRequest))?;
 
         // Send the request.
@@ -255,9 +267,9 @@ where
 
         Ok(())
     }
-    fn poll_rcv_stamp_response<C>(&mut self, ctx: &C) -> Result<Poll<&TimestampToken<D>>, FluidError>
+    fn poll_rcv_stamp_response<C>(&mut self, ctx: &C) -> Result<Poll<&TimestampToken>, FluidError>
     where 
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
         C::Protocol: Serialize
     {
         if let ClientState::ReceivedStampResponse { decision, .. } = self.state.take().unwrap() {
@@ -288,10 +300,10 @@ where
         &mut self,
         ctx: &C,
         token_type: T
-    ) -> Result<Poll<&TimestampToken<D>>, FluidError>
+    ) -> Result<Poll<&TimestampToken>, FluidError>
     where
         T: FixedByteRepr<1>,
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
         C::Protocol: FixedByteRepr<1>,
         C::Protocol: Serialize
     {
@@ -325,16 +337,14 @@ where
 
 
 /// Parse the stamp response into a usable set of data.
-fn parse_stamp_response<D>(raw: FullResponse) -> Result<ExecResponse<D>, FluidError>
-where
-    D: Rfc3339 + FixedByteRepr<8>
+fn parse_stamp_response(raw: FullResponse) -> Result<ExecResponse, FluidError>
 {
     if raw.status() == StatusCode::RESET_CONTENT {
         // Needs a cycle.
         Ok(ExecResponse::CycleRequired)
     } else if raw.status() == StatusCode::CREATED {
         // Created the token.
-        let ptr: PostTokenResponse<D> = raw
+        let ptr: PostTokenResponse<DateTime<Utc>> = raw
             .parse_json()
             .map_err(|e| FluidError::FailedDeserializingPtr(e))?;
         Ok(ExecResponse::Return { token: ptr.token.inner(), expiry: ptr.expiry.inner() })
@@ -345,10 +355,10 @@ where
 
 
 
-pub enum ExecResponse<D> {
+pub enum ExecResponse {
     Return {
-        token: TimestampToken<D>,
-        expiry: D
+        token: TimestampToken,
+        expiry: DateTime<Utc>
     },
     CycleRequired,
     Invalid(StatusCode),
@@ -394,7 +404,7 @@ mod tests {
     #[test]
     pub fn test_correct_workflow_registered() {
         /* This test runs what should be a fully correct workflow! */
-        let mut executor = ClientProtocol::<TestTimeStub, DummyKeyChain>::new();
+        let mut executor = ClientProtocol::<DummyKeyChain>::new();
         executor.generate();
         
         // We will assume this is registered here (to test correct flow)
@@ -410,7 +420,7 @@ mod tests {
         assert!(initial.is_pending());
 
         // We should be in the sending token state.
-        let inner_token: TimestampToken<TestTimeStub>;
+        let inner_token: TimestampToken;
         if let ClientState::SendingToken { outstanding } = executor.state.as_ref().unwrap() {
             inner_token = TimestampToken::try_from(outstanding.get_bytes().to_vec()).unwrap();
         } else {
@@ -426,7 +436,7 @@ mod tests {
         // We will emulate the server approving this.
         let success = form_post_token_response(TokenVerdict::Success { 
             token: inner_token.clone(),
-            expiry: TestTimeStub::from_millis_since_epoch(100)
+            expiry: DateTime::from_millis_since_epoch(100)
         }).unwrap();
 
         // Handle this input.
@@ -459,7 +469,7 @@ mod tests {
 
     #[test]
     pub fn test_token_poll_not_registered() {
-        let mut executor = ClientProtocol::<TestTimeStub, DummyKeyChain>::new();
+        let mut executor = ClientProtocol::<DummyKeyChain>::new();
 
         let context = TestExecutor::generic();
 

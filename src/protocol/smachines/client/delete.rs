@@ -51,9 +51,9 @@ impl DeletionBinding {
     }
 
     /// This polls the registry binding for a transmission.
-    pub fn poll_transmit<C, D>(&mut self, ctx: &C) -> Result<Option<Message>, FluidError>
+    pub fn poll_transmit<C>(&mut self, ctx: &C) -> Result<Option<Message>, FluidError>
     where
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
         C::Protocol: Serialize,
     {
         match &self.state {
@@ -93,9 +93,9 @@ impl DeletionBinding {
             }
         }
     }
-    pub fn handle_input<C, D>(&mut self, ctx: &C, response: FullResponse) -> Result<(), FluidError>
+    pub fn handle_input<C>(&mut self, ctx: &C, response: FullResponse) -> Result<(), FluidError>
     where
-        C: ProtocolCtx<D>,
+        C: ProtocolCtx,
     {
         match &self.state {
             DeleteState::Fresh => { /* In this state we are not expecting any output. */ }

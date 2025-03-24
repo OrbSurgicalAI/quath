@@ -1,9 +1,10 @@
+use chrono::{DateTime, Utc};
 use http::StatusCode;
 
 use crate::{protocol::web::{container::{b64::B64Owned, rfc3339::{Rfc3339, Rfc3339Container}}, payload::PostTokenResponse}, token::token::TimestampToken};
 
 use super::verdict::Verdict;
-pub enum TokenVerdict<'a, D> {
+pub enum TokenVerdict<'a> {
     /// The token may be valid, however the key itself must
     /// be cycled before this request can be handled.
     NeedsCycle,
@@ -19,18 +20,16 @@ pub enum TokenVerdict<'a, D> {
     /// and the client should retry.
     InternalServerError,
     /// The token was succesfully created.
-    Success { token: TimestampToken<D>, expiry: D },
+    Success { token: TimestampToken, expiry: DateTime<Utc> },
     /// There is already a token that exists with this identity
     Conflict 
 }
 
 
 
-impl<D> Into<Verdict<PostTokenResponse<D>>> for TokenVerdict<'_, D>
-where 
-    D: Rfc3339
+impl Into<Verdict<PostTokenResponse<DateTime<Utc>>>> for TokenVerdict<'_>
 {
-    fn into(self) -> Verdict<PostTokenResponse<D>> {
+    fn into(self) -> Verdict<PostTokenResponse<DateTime<Utc>>> {
         match self {
             Self::NeedsCycle => Verdict::custom(
                 "NeedsCycle",
@@ -75,7 +74,7 @@ mod tests {
 
 
         /* Makes sure that the server is properly making responses. */
-        let formulated = form_post_token_response::<TestTimeStub>(TokenVerdict::Conflict).unwrap();
+        let formulated = form_post_token_response(TokenVerdict::Conflict).unwrap();
 
         let body: Value = serde_json::from_str(&formulated.into_body()).unwrap();
         assert!(body.get("code").is_some_and(Value::is_string));
