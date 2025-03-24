@@ -9,9 +9,9 @@ use uuid::Uuid;
 
 use crate::{
     protocol::{
-        config::Configuration, error::FluidError, executor::{Connection, ExecResponse, FixedByteRepr, ProtocolCtx, TimeObj}, web::container::rfc3339::{Rfc3339, Rfc3339Str}
+        config::Configuration, error::FluidError, executor::{Connection, ExecResponse, FixedByteRepr, ProtocolCtx, TimeObj}, smachines::server::context::ServerContext, web::container::rfc3339::{Rfc3339, Rfc3339Str}
     },
-    token::{signature::{KeyChain, PrivateKey, PublicKey, Signature}, token::{AliveToken, FluidToken, TimestampToken}},
+    token::{signature::{KeyChain, PrivateKey, PublicKey, Signature}, token::{AliveToken, FluidToken, TimestampToken}, tolerance::TokenTolerance},
 };
 
 
@@ -248,6 +248,44 @@ impl ProtocolCtx for TestExecutor {
         self.current_time() + Duration::from_secs(50)
     }
 }
+
+pub struct DummyServerContext {
+    pub internal_clock: DateTime<Utc>,
+    pub expiry_times: Duration,
+    pub key_renewal_period: Duration,
+    pub tolerance: TokenTolerance
+}
+
+impl DummyServerContext {
+    pub fn new() -> Self {
+        Self {
+            internal_clock: DateTime::from_timestamp_millis(0).unwrap(),
+            expiry_times: Duration::ZERO,
+            key_renewal_period: Duration::ZERO,
+            tolerance: TokenTolerance::ZERO
+        }
+    }
+}
+
+impl ServerContext for DummyServerContext {
+    
+    fn current_time(&self) -> DateTime<Utc> {
+        self.internal_clock
+    }
+    fn issue_expiry(&self) -> DateTime<Utc> {
+        self.internal_clock + self.expiry_times
+    }
+    fn key_renewal_period(&self) -> Duration {
+        self.key_renewal_period
+    }
+    fn modify_token(&self, token: crate::token::token::GenericToken) -> crate::token::token::GenericToken {
+        token
+    }
+    fn token_tolerance(&self) -> &TokenTolerance {
+        &self.tolerance
+    }
+}
+
 
 
 #[cfg(test)]

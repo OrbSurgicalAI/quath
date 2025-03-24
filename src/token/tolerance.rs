@@ -11,13 +11,19 @@ use super::token::GenericToken;
 /// 
 /// This range is inclusive.
 pub struct TokenTolerance {
+    
     forwards: Duration,
     backwards: Duration
 }
 
 
 
+
 impl TokenTolerance {
+    pub const ZERO: Self = Self {
+        backwards: Duration::ZERO,
+        forwards: Duration::ZERO
+    };
     pub fn new(backwards: Duration, forwards: Duration) -> Self {
         Self {
             forwards, backwards

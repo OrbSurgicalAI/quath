@@ -156,7 +156,7 @@ where
                 match result {
                     ExecResponse::Return { token, expiry } => {
                         // TODO: Verify fields line up.
-                        println!("Returned: {:?} {:?}", token.get_bytes(), expiry.to_rfc3339().to_string());
+                        println!("Returned: {:?} {:?} {:?}", token.get_bytes(), expiry.to_rfc3339().to_string(), token.timestamp());
                         println!("Wow {} {}", token.timestamp().seconds_since_epoch() + expiry.seconds_since_epoch(), ctx.current_time().seconds_since_epoch());
                         self.token = Some(AliveToken::from_raw(token, expiry));
                         println!("IsVALID: {:?}", self.is_current_valid(ctx));
@@ -405,7 +405,7 @@ mod tests {
         // println!("Modified: {:?}", pending_token.get_bytes());
 
         // The server approves it, this should be the end.
-        let server_resp = form_post_token_response(TokenVerdict::Success { token: pending_token.clone().randomize_body(), expiry: DateTime::from_millis_since_epoch(100) }).unwrap();
+        let server_resp = form_post_token_response(TokenVerdict::Success { token: pending_token.clone().randomize_body(), expiry: DateTime::from_millis_since_epoch(100 * 1000) }).unwrap();
         register_binding
             .handle_input(&context, FullResponse::from_raw(server_resp))
             .unwrap();

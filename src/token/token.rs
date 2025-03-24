@@ -51,7 +51,7 @@ pub struct TimestampToken {
     data: [u8; 74]
 }
 
-
+#[derive(Debug, PartialEq)]
 pub struct GenericToken([u8; 74]);
 
 impl GenericToken {
@@ -233,7 +233,7 @@ where
     T: FixedByteRepr<1>,
     P: FixedByteRepr<1>
 {
-    pub fn generic(self) -> TimestampToken {
+    pub fn generic(&self) -> TimestampToken {
         let data = self.to_bytes();
         TimestampToken { timestamp: self.timestamp, data }
     }

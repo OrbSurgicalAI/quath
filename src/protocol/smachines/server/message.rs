@@ -37,6 +37,6 @@ where
         last_renewal_time: DateTime<Utc>
     },
     NoEntityFound,
-    StoreSuccess,
+    StoreTokenSuccess,
     StoreError(String)
 }
