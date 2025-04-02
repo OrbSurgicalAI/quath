@@ -3,7 +3,8 @@ use core::ops::Range;
 
 use chrono::{DateTime, Utc};
 
-use crate::protocol::executor::FixedByteRepr;
+
+use crate::protocol::spec::traits::FixedByteRepr;
 
 use super::token::GenericToken;
 
@@ -55,7 +56,7 @@ mod tests {
 
     use chrono::{DateTime, Utc};
 
-    use crate::{protocol::executor::TimeObj, token::token::{GenericToken, TimestampToken}};
+    use crate::{protocol::spec::traits::TimeObj, token::token::{GenericToken, TimestampToken}};
 
     use super::TokenTolerance;
 

@@ -1,1 +1,3 @@
-pub struct Protocol(pub String);
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Protocol(pub &'static str);

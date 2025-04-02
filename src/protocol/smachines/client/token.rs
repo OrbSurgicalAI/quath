@@ -8,11 +8,9 @@ use uuid::Uuid;
 use crate::{
     protocol::{
         error::FluidError,
-        executor::{FixedByteRepr, ProtocolCtx, TimeObj},
-        http::prep_request,
-        spec::registry::SvcEntity,
+        spec::{registry::SvcEntity, traits::{FixedByteRepr, ProtocolCtx, TimeObj}},
         web::{
-            body::FullResponse, container::rfc3339::Rfc3339, http::{form_cycle_request, form_service_entity_create_request, form_token_put}, payload::PostTokenResponse, server::{create::RegisterVerdict, cycle::CycleVerdict, verdict::Verdict}
+            body::FullResponse, container::rfc3339::Rfc3339, http::{form_cycle_request, form_service_entity_create_request, form_token_put, prep_request}, payload::PostTokenResponse, server::{create::RegisterVerdict, cycle::CycleVerdict, verdict::Verdict}
         },
     },
     token::{signature::{KeyChain, PrivateKey}, token::{AliveToken, FluidToken, TimestampToken}},
@@ -260,7 +258,7 @@ mod tests {
 
    
 
-    use crate::{protocol::{executor::{ProtocolCtx, TimeObj}, smachines::client::{message::Message, token::{TokenPoll, TokenState}}, spec::registry::SvcEntity, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}}, testing::{DummyKeyChain, TestExecutor, TestTimeStub}, token::{signature::KeyChain, token::TimestampToken}};
+    use crate::{protocol::{smachines::client::{message::Message, token::{TokenPoll, TokenState}}, spec::{registry::SvcEntity, traits::{ProtocolCtx, TimeObj}}, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}}, testing::{DummyKeyChain, TestExecutor, TestTimeStub}, token::{signature::KeyChain, token::TimestampToken}};
 
     use super::TokenBinding;
 

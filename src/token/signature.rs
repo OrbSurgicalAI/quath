@@ -31,13 +31,27 @@ pub trait PrivateKey<S, E>: AsRef<[u8]> {
     }
 }
 
-pub trait PublicKey<S>: AsRef<[u8]> {
+pub trait PublicKey<S>: AsRef<[u8]> + Sized {
     fn verify(&self, bytes: &[u8], signature: &S) -> bool;
     fn as_bytes(&self) -> &[u8] {
         self.as_ref()
     }
+    fn as_b64(&self) -> B64Public {
+        B64Public::from_public_key(self)
+    }
+    fn from_b64(key: &B64Public) -> Self;
 }
 
+pub struct B64Public(String);
+
+impl B64Public {
+    pub fn from_public_key<S, P: PublicKey<S>>(public: &P) -> B64Public {
+        B64Public(BASE64_URL_SAFE.encode(public.as_bytes()))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 #[cfg(test)]
 mod tests {

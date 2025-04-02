@@ -5,8 +5,7 @@ use serde::Serialize;
 use crate::{
     protocol::{
         error::FluidError,
-        executor::{FixedByteRepr, ProtocolCtx, TimeObj},
-        spec::registry::SvcEntity,
+        spec::{registry::SvcEntity, traits::{FixedByteRepr, ProtocolCtx}},
         web::{body::FullResponse, container::rfc3339::Rfc3339},
     },
     token::{signature::KeyChain, token::TimestampToken},
@@ -126,7 +125,7 @@ mod tests {
 
     use crate::{
         protocol::{
-            executor::TimeObj, smachines::client::{message::Message, operate::InnerMachine}, spec::registry::SvcEntity, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}
+            smachines::client::{message::Message, operate::InnerMachine}, spec::{registry::SvcEntity, traits::TimeObj}, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}
         },
         testing::{DummyKeyChain, TestExecutor, TestTimeStub},
         token::{signature::KeyChain, token::TimestampToken},

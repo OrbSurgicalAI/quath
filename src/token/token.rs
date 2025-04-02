@@ -1,11 +1,13 @@
-use std::{cmp::Ordering, fmt::Debug, ops::{Deref, Range}};
+use std::{cmp::Ordering, fmt::Debug, ops::Range};
 
 use chrono::{DateTime, Utc};
 use rand::{Rng, RngCore};
 use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
 
-use crate::protocol::{error::FluidError, executor::{FixedByteRepr, ProtocolCtx, TimeObj}};
+use crate::protocol::{error::FluidError, spec::traits::{FixedByteRepr, ProtocolCtx, TimeObj}};
+
+
 
 
 const UUID_RANGE: Range<usize> = 2..18;
@@ -290,7 +292,7 @@ mod tests {
     use http::Uri;
     use sha3::{Digest, Sha3_256};
 
-    use crate::{protocol::{config::Configuration, executor::Connection}, testing::{make_testing_token, ExampleProtocol, ExampleType, TestExecutor, TestTimeStub}, token::tolerance::TokenTolerance};
+    use crate::{testing::{make_testing_token, ExampleProtocol, ExampleType}, token::tolerance::TokenTolerance};
 
     use super::FluidToken;
 

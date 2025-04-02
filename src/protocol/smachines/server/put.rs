@@ -5,8 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     protocol::{
-        executor::TimeObj,
-        smachines::{common::{ServerStateMachine, StateMachineState}, container::State},
+        smachines::{common::{ServerStateMachine, StateMachineState}, container::State}, spec::traits::TimeObj,
     },
     token::{
         signature::{KeyChain, PublicKey},
@@ -73,13 +72,12 @@ pub struct PutTokenResult {
     pub expiry: DateTime<Utc>
 }
 
-impl<KC> ServerStateMachine<SvrMsg, ServerResponse<KC>> for PutTokenBinding<KC>
+impl<KC> ServerStateMachine<SvrMsg, ServerResponse> for PutTokenBinding<KC>
 where 
     KC: KeyChain
 {
     type Error = PutTokenError;
     type Result = PutTokenResult;
-
 
     fn poll_transmit<C: ServerContext>(&mut self, ctx: &C) -> Option<SvrMsg>
     {
@@ -104,7 +102,7 @@ where
         }
     }
 
-    fn input<C: ServerContext>(&mut self, ctx: &C, inner: ServerResponse<KC>) {
+    fn input<C: ServerContext>(&mut self, ctx: &C, inner: ServerResponse) {
 
         let mut state = self.state.handle();
 
@@ -137,7 +135,7 @@ where
                     return;
                 }
 
-                if !public.verify(self.token.as_ref().unwrap().as_bytes(), &self.signature) {
+                if !KC::Public::from_b64(&public).verify(self.token.as_ref().unwrap().as_bytes(), &self.signature) {
                     /* Could not verify the signature */
                     self.send_to_error(PutTokenError::CouldNotVerify);
                     return;
@@ -230,7 +228,7 @@ mod tests {
     use chrono::DateTime;
     use uuid::{uuid, Uuid};
 
-    use crate::{protocol::{executor::TimeObj, smachines::{common::ServerStateMachine, server::{context::ServerContext, message::{DatabaseQuery, DatabaseResponse, ServerResponse, SvrMsg}, put::PutTokenResult}}}, testing::{DummyKeyChain, DummyServerContext, ExampleProtocol, ExampleType}, token::{signature::{KeyChain, PrivateKey}, token::{FluidToken, TimestampToken}}};
+    use crate::{protocol::{smachines::{common::ServerStateMachine, server::{context::ServerContext, message::{DatabaseQuery, DatabaseResponse, ServerResponse, SvrMsg}, put::PutTokenResult}}, spec::traits::TimeObj}, testing::{DummyKeyChain, DummyServerContext, ExampleProtocol, ExampleType}, token::{signature::{KeyChain, PrivateKey, PublicKey}, token::{FluidToken, TimestampToken}}};
 
     use super::{PutTokenBinding, VerifyTokenState};
 
@@ -267,7 +265,7 @@ mod tests {
         };
 
         // Send the private key to the binding.
-        binding.input(&ctx, ServerResponse::DbResult(DatabaseResponse::PkDetails { entity_id: mid, public: public_key, last_renewal_time: ctx.current_time() }));
+        binding.input(&ctx, ServerResponse::DbResult(DatabaseResponse::PkDetails { entity_id: mid, public: public_key.as_b64(), last_renewal_time: ctx.current_time() }));
 
         if let VerifyTokenState::StoreToken = *binding.state.handle() {} else {
             panic!("The binding should have been ready to store the token on the next poll.")

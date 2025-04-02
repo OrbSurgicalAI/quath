@@ -1,6 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 use arbitrary::Arbitrary;
+use base64::{prelude::BASE64_URL_SAFE, Engine};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use http::Uri;
 use rand::{Rng, RngCore};
@@ -9,7 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     protocol::{
-        config::Configuration, error::FluidError, executor::{Connection, ExecResponse, FixedByteRepr, ProtocolCtx, TimeObj}, smachines::server::context::ServerContext, web::container::rfc3339::{Rfc3339, Rfc3339Str}
+        config::Configuration, error::FluidError, smachines::server::context::ServerContext, spec::{details::Protocol, traits::{Connection, FixedByteRepr, ProtocolCtx, TimeObj}}, web::container::rfc3339::{Rfc3339, Rfc3339Str}
     },
     token::{signature::{KeyChain, PrivateKey, PublicKey, Signature}, token::{AliveToken, FluidToken, TimestampToken}, tolerance::TokenTolerance},
 };
@@ -74,10 +75,13 @@ impl PrivateKey<DummySignature, FluidError> for DummyPrivate {
 
 impl PublicKey<DummySignature> for DummyPublic {
     fn verify(&self, bytes: &[u8], signature: &DummySignature) -> bool {
-        signature.actual == bytes && self.0 == signature.underlying
+        signature.actual == bytes && self.0[..8] == signature.underlying
     }
     fn as_bytes(&self) -> &[u8] {
-        &self.1
+        &self.0
+    }
+    fn from_b64(key: &crate::token::signature::B64Public) -> Self {
+        Self(BASE64_URL_SAFE.decode(key.as_str()).unwrap().try_into().unwrap())
     }
 }
 
@@ -88,7 +92,14 @@ impl KeyChain for DummyKeyChain {
     type Error = FluidError;
     fn generate() -> (Self::Public, Self::Private) {
         let stem: [u8; 8] = rand::rng().random();
-        (DummyPublic(stem.clone(), rand::rng().random()), DummyPrivate(stem))
+
+        let seed: [u8; 4] = rand::rng().random();
+
+        let mut total: [u8; 12] = [0u8; 12];
+        total[..8].copy_from_slice(&stem);
+        total[8..].copy_from_slice(&seed);
+
+        (DummyPublic(total), DummyPrivate(stem))
     }
 }
 
@@ -96,7 +107,7 @@ impl KeyChain for DummyKeyChain {
 pub struct DummyPrivate([u8; 8]);
 
 #[derive(Clone)]
-pub struct DummyPublic([u8; 8], [u8; 4]);
+pub struct DummyPublic([u8; 12]);
 
 pub struct DummySignature {
     actual: Vec<u8>,
@@ -232,7 +243,7 @@ impl ProtocolCtx for TestExecutor {
     fn config(&self) -> &crate::protocol::config::Configuration {
         &self.configuration
     }
-    fn connection(&self) -> &crate::protocol::executor::Connection {
+    fn connection(&self) -> &Connection {
         &self.connection
     }
     fn protocol(&self) -> ExampleProtocol {
@@ -253,7 +264,8 @@ pub struct DummyServerContext {
     pub internal_clock: DateTime<Utc>,
     pub expiry_times: Duration,
     pub key_renewal_period: Duration,
-    pub tolerance: TokenTolerance
+    pub tolerance: TokenTolerance,
+    pub protocol: Protocol
 }
 
 impl DummyServerContext {
@@ -262,7 +274,8 @@ impl DummyServerContext {
             internal_clock: DateTime::from_timestamp_millis(0).unwrap(),
             expiry_times: Duration::ZERO,
             key_renewal_period: Duration::ZERO,
-            tolerance: TokenTolerance::ZERO
+            tolerance: TokenTolerance::ZERO,
+            protocol: Protocol("")
         }
     }
 }
@@ -283,6 +296,9 @@ impl ServerContext for DummyServerContext {
     }
     fn token_tolerance(&self) -> &TokenTolerance {
         &self.tolerance
+    }
+    fn protocol(&self) -> crate::protocol::spec::details::Protocol {
+        self.protocol
     }
 }
 

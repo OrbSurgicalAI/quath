@@ -2,13 +2,14 @@ use chrono::{DateTime, Utc};
 use http::{
     header::{self, AUTHORIZATION, CONTENT_TYPE}, HeaderValue, Method, Request, Response, StatusCode
 };
-use http_body_util::Empty;
+use http_body_util::{Empty, Full};
 use hyper::body::Bytes;
 use serde::Serialize;
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    protocol::{error::FluidError, executor::Connection},
+    protocol::{error::FluidError, spec::traits::Connection},
     token::{
         signature::{KeyChain, PrivateKey, PublicKey},
         token::TimestampToken,
@@ -23,6 +24,30 @@ use super::{
     payload::{CreateServiceEntityRequest, CycleRequest, DeleteSvcEntityRequest, PostTokenResponse, TokenStampRequest},
     server::{create::RegisterVerdict, cycle::CycleVerdict, delete::DeletionVerdict, token::TokenVerdict, verdict::Verdict},
 };
+
+#[derive(Error, Debug)]
+pub(crate) enum NetworkError {
+    #[error("Serialization/deserialization failed as part of the request preparation")]
+    SerdeError(#[from] serde_json::Error),
+    #[error("Request error")]
+    HyperClientError(#[from] hyper_util::client::legacy::Error),
+    #[error("Error with the hyper library")]
+    HyperError(#[from] hyper::Error)
+}
+
+pub(crate) fn prep_request<S>(request: Request<S>) -> Result<Request<Full<Bytes>>, NetworkError>
+where 
+    S: Serialize
+{
+
+    let request_new = Bytes::from_owner(serde_json::to_vec(request.body())?);
+
+    let (parts, _) = request.into_parts();
+
+    let modified = Request::from_parts(parts, Full::from(request_new));
+
+    Ok(modified)
+}
 
 pub(crate) fn form_post_token_response(
     verdict: TokenVerdict<'_>,

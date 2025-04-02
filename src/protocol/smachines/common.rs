@@ -1,4 +1,6 @@
-use crate::protocol::executor::ProtocolCtx;
+
+
+use crate::protocol::spec::traits::ProtocolCtx;
 
 use super::server::context::ServerContext;
 

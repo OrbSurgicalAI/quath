@@ -6,9 +6,9 @@ use uuid::Uuid;
 
 use crate::{
     protocol::{
-        error::FluidError, executor::ProtocolCtx, http::prep_request, spec::registry::SvcEntity, web::{
+        error::FluidError, spec::{registry::SvcEntity, traits::ProtocolCtx}, web::{
             body::FullResponse,
-            http::form_service_entity_create_request,
+            http::{form_service_entity_create_request, prep_request},
             server::{create::RegisterVerdict, verdict::Verdict},
         }
     },
@@ -209,7 +209,7 @@ mod tests {
     use http::{header::AUTHORIZATION, HeaderValue};
     use uuid::Uuid;
 
-    use crate::{protocol::{executor::ProtocolCtx, smachines::client::{message::Message, register::RegisterState}, web::{body::FullResponse, http::form_register_response, server::create::RegisterVerdict}}, testing::{DummyKeyChain, TestExecutor}};
+    use crate::{protocol::{smachines::client::{message::Message, register::RegisterState}, spec::traits::ProtocolCtx, web::{body::FullResponse, http::form_register_response, server::create::RegisterVerdict}}, testing::{DummyKeyChain, TestExecutor}};
 
     use super::RegisterBinding;
 

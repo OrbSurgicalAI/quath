@@ -6,14 +6,11 @@ use uuid::Uuid;
 
 use crate::
     protocol::{
-        error::FluidError,
-        executor::ProtocolCtx,
-        http::prep_request,
-        web::{
+        error::FluidError, spec::traits::ProtocolCtx, web::{
             body::FullResponse,
-            http::form_service_entity_deletion_request,
+            http::{form_service_entity_deletion_request, prep_request},
             server::{delete::DeletionVerdict, verdict::Verdict},
-        },
+        }
     }
 ;
 
@@ -157,7 +154,7 @@ mod tests {
 
     use crate::{
         protocol::{
-            executor::ProtocolCtx, smachines::client::{delete::DeleteState, message::Message}, web::{
+            smachines::client::{delete::DeleteState, message::Message}, spec::traits::ProtocolCtx, web::{
                 body::FullResponse, http::{form_deletion_response, form_register_response}, server::{create::RegisterVerdict, delete::DeletionVerdict},
             }
         },

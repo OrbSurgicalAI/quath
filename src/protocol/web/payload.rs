@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::token::{signature::KeyChain, token::TimestampToken};
 
 use super::container::{b64::{B64Owned, B64Ref}, rfc3339::{Rfc3339, Rfc3339Container, Rfc3339Str}};
-use crate::protocol::executor::FixedByteRepr;
+
 
 pub struct CycleRequest<'a, P, M, KC>
 where

@@ -7,12 +7,10 @@ use uuid::Uuid;
 use crate::{
     protocol::{
         error::FluidError,
-        executor::ProtocolCtx,
-        http::prep_request,
-        spec::registry::SvcEntity,
+        spec::{registry::SvcEntity, traits::ProtocolCtx},
         web::{
             body::FullResponse,
-            http::{form_cycle_request, form_service_entity_create_request},
+            http::{form_cycle_request, form_service_entity_create_request, prep_request},
             server::{create::RegisterVerdict, cycle::CycleVerdict, verdict::Verdict},
         },
     },
@@ -169,7 +167,7 @@ mod tests {
 
    
 
-    use crate::{protocol::{executor::ProtocolCtx, smachines::client::{cycle::CycleState, message::Message}, spec::registry::SvcEntity, web::{body::FullResponse, http::form_cycle_response, server::cycle::CycleVerdict}}, testing::{DummyKeyChain, TestExecutor}, token::signature::KeyChain};
+    use crate::{protocol::{smachines::client::{cycle::CycleState, message::Message}, spec::{registry::SvcEntity, traits::ProtocolCtx}, web::{body::FullResponse, http::form_cycle_response, server::cycle::CycleVerdict}}, testing::{DummyKeyChain, TestExecutor}, token::signature::KeyChain};
 
     use super::CycleBinding;
 
