@@ -205,9 +205,9 @@ mod tests {
         let mid = uuid!("1a3c4730-86ae-49c2-b3c4-7ed1088980e6");
         let (public, private) = DummyKeyChain::generate();
         let mut binding: CreateEntityBinding<DummyKeyChain> =
-            CreateEntityBinding::create(mid, public.clone(), Protocol("Example"));
+            CreateEntityBinding::create(mid, public.clone(), Protocol::DUMMY);
         let mut context = DummyServerContext::new();
-        context.protocol = Protocol("Example");
+        context.protocol = Protocol::DUMMY;
 
         if let CreateState::Fresh = *binding.state.handle() {
         } else {

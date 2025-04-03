@@ -125,7 +125,7 @@ mod tests {
 
     use crate::{
         protocol::{
-            smachines::client::{message::Message, operate::InnerMachine}, spec::{registry::SvcEntity, traits::TimeObj}, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}
+            smachines::client::{message::Message, operate::InnerMachine}, spec::{registry::SvcEntity, time::MsSinceEpoch}, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}
         },
         testing::{DummyKeyChain, TestExecutor, TestTimeStub},
         token::{signature::KeyChain, token::TimestampToken},
@@ -214,8 +214,8 @@ mod tests {
             .handle_input(
                 &ctx,
                 FullResponse::from_raw(form_post_token_response(TokenVerdict::Success {
-                    token: TimestampToken::random_with_ts(DateTime::from_millis_since_epoch(0)),
-                    expiry: DateTime::from_millis_since_epoch(1000)
+                    token: TimestampToken::random_with_ts(MsSinceEpoch::from_timestamp_millis(0)),
+                    expiry: MsSinceEpoch::from_timestamp_millis(1000)
                 }).unwrap()),
             )
             .unwrap();

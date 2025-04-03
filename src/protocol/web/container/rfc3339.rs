@@ -3,6 +3,8 @@ use chrono::{DateTime, FixedOffset, ParseError, Utc};
 use serde::{de::Visitor, Deserialize, Serialize};
 
 
+use crate::protocol::spec::time::MsSinceEpoch;
+
 use super::error::ContainerError;
 
 
@@ -47,6 +49,17 @@ impl Rfc3339Str {
     }
     pub fn to_string(self) -> String {
         self.0
+    }
+}
+
+
+impl Rfc3339 for MsSinceEpoch {
+    type Error = chrono::ParseError;
+    fn to_rfc3339(&self) -> crate::protocol::web::container::rfc3339::Rfc3339Str {
+        Rfc3339Str(DateTime::from_timestamp_millis(self.milliseconds_since_epoch()).unwrap().to_rfc3339())
+    }
+    fn parse_rfc3339(candidate: &str) -> Result<Self, Self::Error> {
+       Ok(Self::from_timestamp_millis(DateTime::parse_from_rfc3339(candidate)?.timestamp_millis()))
     }
 }
 

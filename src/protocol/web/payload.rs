@@ -1,7 +1,7 @@
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::token::{signature::KeyChain, token::TimestampToken};
+use crate::{protocol::spec::time::MsSinceEpoch, token::{signature::KeyChain, token::TimestampToken}};
 
 use super::container::{b64::{B64Owned, B64Ref}, rfc3339::{Rfc3339, Rfc3339Container, Rfc3339Str}};
 
@@ -85,14 +85,12 @@ where
 
 
 #[derive(Deserialize, Serialize)]
-pub struct PostTokenResponse<D>
+pub struct PostTokenResponse
 {
     #[serde(bound(serialize = ""))]
     // #[serde(bound(deserialize = "D: FixedByteRepr<8>"))]
     pub token: B64Owned<TimestampToken>,
-    #[serde(bound(deserialize = "D: Rfc3339"))]
-    #[serde(bound(serialize = "D: Rfc3339"))]
-    pub expiry: Rfc3339Container<D>
+    pub expiry: Rfc3339Container<MsSinceEpoch>
 }
 
 

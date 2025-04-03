@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{
     protocol::{
         error::FluidError,
-        spec::{registry::SvcEntity, traits::{FixedByteRepr, ProtocolCtx, TimeObj}},
+        spec::{registry::SvcEntity, time::MsSinceEpoch, traits::{FixedByteRepr, ProtocolCtx}},
         web::{
             body::FullResponse, container::rfc3339::Rfc3339, http::{form_cycle_request, form_service_entity_create_request, form_token_put, prep_request}, payload::PostTokenResponse, server::{create::RegisterVerdict, cycle::CycleVerdict, verdict::Verdict}
         },
@@ -219,7 +219,7 @@ impl TokenPoll<'_> {
 pub enum ExecResponse {
     Return {
         token: TimestampToken,
-        expiry: DateTime<Utc>
+        expiry: MsSinceEpoch
     },
     CycleRequired,
     Recoverable,
@@ -237,7 +237,7 @@ fn parse_stamp_response(raw: FullResponse) -> Result<ExecResponse, FluidError>
         Ok(ExecResponse::Recoverable)
     } else if raw.status() == StatusCode::CREATED {
         // Created the token.
-        let ptr: PostTokenResponse<DateTime<Utc>> = raw
+        let ptr: PostTokenResponse = raw
             .parse_json()
             .map_err(|e| FluidError::FailedDeserializingPtr(e))?;
         Ok(ExecResponse::Return { token: ptr.token.inner(), expiry: ptr.expiry.inner() })
@@ -258,7 +258,7 @@ mod tests {
 
    
 
-    use crate::{protocol::{smachines::client::{message::Message, token::{TokenPoll, TokenState}}, spec::{registry::SvcEntity, traits::{ProtocolCtx, TimeObj}}, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}}, testing::{DummyKeyChain, TestExecutor, TestTimeStub}, token::{signature::KeyChain, token::TimestampToken}};
+    use crate::{protocol::{smachines::client::{message::Message, token::{TokenPoll, TokenState}}, spec::{registry::SvcEntity, time::MsSinceEpoch, traits::{ProtocolCtx}}, web::{body::FullResponse, http::form_post_token_response, server::token::TokenVerdict}}, testing::{DummyKeyChain, TestExecutor, TestTimeStub}, token::{signature::KeyChain, token::TimestampToken}};
 
     use super::TokenBinding;
 
@@ -403,7 +403,7 @@ mod tests {
         // println!("Modified: {:?}", pending_token.get_bytes());
 
         // The server approves it, this should be the end.
-        let server_resp = form_post_token_response(TokenVerdict::Success { token: pending_token.clone().randomize_body(), expiry: DateTime::from_millis_since_epoch(100 * 1000) }).unwrap();
+        let server_resp = form_post_token_response(TokenVerdict::Success { token: pending_token.clone().randomize_body(), expiry: MsSinceEpoch::from_timestamp_millis(100 * 1000) }).unwrap();
         register_binding
             .handle_input(&context, FullResponse::from_raw(server_resp))
             .unwrap();

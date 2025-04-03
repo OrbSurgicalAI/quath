@@ -161,7 +161,7 @@ mod tests {
     use chrono::DateTime;
     use uuid::{uuid, Uuid};
 
-    use crate::{protocol::{smachines::{common::ServerStateMachine, server::{context::ServerContext, message::{DatabaseQuery, DatabaseResponse, ServerResponse, SvrMsg}, put::PutTokenResult}}, spec::{details::Protocol, traits::TimeObj}}, testing::{DummyKeyChain, DummyServerContext, ExampleProtocol, ExampleType}, token::{signature::{KeyChain, PrivateKey, PublicKey}, token::{FluidToken, TimestampToken}}};
+    use crate::{protocol::{smachines::{common::ServerStateMachine, server::{context::ServerContext, message::{DatabaseQuery, DatabaseResponse, ServerResponse, SvrMsg}, put::PutTokenResult}}, spec::{details::Protocol, time::MsSinceEpoch}}, testing::{DummyKeyChain, DummyServerContext, ExampleProtocol, ExampleType}, token::{signature::{KeyChain, PrivateKey, PublicKey}, token::{FluidToken, TimestampToken}}};
 
     use super::{VerifyTokenBinding, VerifyState};
 
@@ -173,10 +173,10 @@ mod tests {
         // Set up the binding, generate & sign a token.
         let mid = uuid!("1a3c4730-86ae-49c2-b3c4-7ed1088980e6");
         let (public, private) = DummyKeyChain::generate();
-        let dummy = FluidToken::from_raw(ExampleProtocol(0), ExampleType(0), Uuid::nil(), DateTime::from_millis_since_epoch(0), [0u8; 32], [0u8; 16]);
+        let dummy = FluidToken::from_raw(ExampleProtocol(0), ExampleType(0), Uuid::nil(), MsSinceEpoch::from_timestamp_millis(0), [0u8; 32], [0u8; 16]);
         let mut binding = VerifyTokenBinding::create(mid, dummy.generic().generic());
         let mut context = DummyServerContext::new();
-        context.protocol = Protocol("Example");
+        context.protocol = Protocol::DUMMY;
 
 
         if let VerifyState::Fresh = *binding.state.handle() {} else {

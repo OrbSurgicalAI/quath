@@ -4,7 +4,7 @@ use core::ops::Range;
 use chrono::{DateTime, Utc};
 
 
-use crate::protocol::spec::traits::FixedByteRepr;
+use crate::protocol::spec::{time::MsSinceEpoch, traits::FixedByteRepr};
 
 use super::token::GenericToken;
 
@@ -30,9 +30,9 @@ impl TokenTolerance {
             forwards, backwards
         }
     }
-    pub fn check(&self, token: &GenericToken, current: DateTime<Utc>) -> bool
+    pub fn check(&self, token: &GenericToken, current: MsSinceEpoch) -> bool
     {
-        let current_ms = current.timestamp_millis();
+        let current_ms = current.milliseconds_since_epoch();
         let token_ms = DateTime::<Utc>::from_fixed_repr(token.get_time_field()).timestamp_millis();
 
         let difference = token_ms - current_ms;
@@ -56,13 +56,13 @@ mod tests {
 
     use chrono::{DateTime, Utc};
 
-    use crate::{protocol::spec::traits::TimeObj, token::token::{GenericToken, TimestampToken}};
+    use crate::{protocol::spec::time::MsSinceEpoch, token::token::{GenericToken, TimestampToken}};
 
     use super::TokenTolerance;
 
 
-    fn qts(time: i64) -> DateTime<Utc> {
-        DateTime::from_millis_since_epoch(time)
+    fn qts(time: i64) -> MsSinceEpoch {
+        MsSinceEpoch::from_timestamp_millis(time)
     }
 
     #[test]

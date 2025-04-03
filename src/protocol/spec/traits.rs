@@ -1,22 +1,24 @@
-use core::{cmp::Ordering, time::Duration};
+use core::time::Duration;
 
 use chrono::{DateTime, Utc};
 use http::Uri;
 
 use crate::protocol::config::Configuration;
 
+use super::time::MsSinceEpoch;
+
 pub trait ProtocolCtx {
     type Protocol;
     type TokenType;
     
     /// Compares the current time against another time.
-    fn current_time(&self) -> DateTime<Utc>;
+    fn current_time(&self) -> MsSinceEpoch;
     fn config(&self) -> &Configuration;
     fn connection(&self) -> &Connection;
     fn protocol(&self) -> Self::Protocol;
     fn retry_cooldown(&self) -> Duration;
     fn get_token_type(&self) -> Self::TokenType;
-    fn issue_expiry(&self) -> DateTime<Utc>;
+    fn issue_expiry(&self) -> Duration;
 }
 
 
@@ -37,23 +39,6 @@ impl Connection {
 impl Connection {
     pub fn new(uri: Uri) -> Self {
         Self { uri }
-    }
-}
-
-pub trait TimeObj {
-    fn cmp_within(&self, other: &Self, bound: i64) -> Ordering {
-        (self.seconds_since_epoch() + bound).cmp(&(other.seconds_since_epoch()))
-    }
-    fn from_millis_since_epoch(seconds: i64) -> Self;
-    fn seconds_since_epoch(&self) -> i64;
-}
-
-impl TimeObj for DateTime<Utc> {
-    fn from_millis_since_epoch(seconds: i64) -> Self {
-        Self::from_timestamp_millis(seconds).unwrap()
-    }
-    fn seconds_since_epoch(&self) -> i64 {
-        self.timestamp()
     }
 }
 

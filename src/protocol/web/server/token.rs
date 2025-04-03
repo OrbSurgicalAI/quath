@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use http::StatusCode;
 
-use crate::{protocol::web::{container::{b64::B64Owned, rfc3339::{Rfc3339, Rfc3339Container}}, payload::PostTokenResponse}, token::token::TimestampToken};
+use crate::{protocol::{spec::time::MsSinceEpoch, web::{container::{b64::B64Owned, rfc3339::{Rfc3339, Rfc3339Container}}, payload::PostTokenResponse}}, token::token::TimestampToken};
 
 use super::verdict::Verdict;
 pub enum TokenVerdict<'a> {
@@ -20,16 +20,16 @@ pub enum TokenVerdict<'a> {
     /// and the client should retry.
     InternalServerError,
     /// The token was succesfully created.
-    Success { token: TimestampToken, expiry: DateTime<Utc> },
+    Success { token: TimestampToken, expiry: MsSinceEpoch },
     /// There is already a token that exists with this identity
     Conflict 
 }
 
 
 
-impl Into<Verdict<PostTokenResponse<DateTime<Utc>>>> for TokenVerdict<'_>
+impl Into<Verdict<PostTokenResponse>> for TokenVerdict<'_>
 {
-    fn into(self) -> Verdict<PostTokenResponse<DateTime<Utc>>> {
+    fn into(self) -> Verdict<PostTokenResponse> {
         match self {
             Self::NeedsCycle => Verdict::custom(
                 "NeedsCycle",

@@ -53,7 +53,7 @@ pub(crate) fn form_post_token_response(
     verdict: TokenVerdict<'_>,
 ) -> Result<Response<String>, FluidError>
 {
-    let verdict: Verdict<PostTokenResponse<DateTime<Utc>>> = verdict.into();
+    let verdict: Verdict<PostTokenResponse> = verdict.into();
     let code = verdict.code();
 
     Response::builder()

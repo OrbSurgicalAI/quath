@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     protocol::{
-        smachines::{common::{ServerStateMachine, StateMachineState}, container::State}, spec::traits::TimeObj,
+        smachines::{common::{ServerStateMachine, StateMachineState}, container::State}, spec::time::MsSinceEpoch
     },
     token::{
         signature::{KeyChain, PublicKey},
@@ -34,7 +34,7 @@ where
 {
     state: State<VerifyTokenState>,
     token: Option<GenericToken>,
-    expiry: Option<DateTime<Utc>>,
+    expiry: Option<MsSinceEpoch>,
     svc_entity_id: Uuid,
     signature: KC::Signature,
 }
@@ -69,7 +69,7 @@ where
 #[derive(Debug, PartialEq)]
 pub struct PutTokenResult {
     pub token: GenericToken,
-    pub expiry: DateTime<Utc>
+    pub expiry: MsSinceEpoch
 }
 
 impl<KC> ServerStateMachine<SvrMsg, ServerResponse> for PutTokenBinding<KC>
@@ -94,7 +94,7 @@ where
 
                 // This will modify the token!
                 self.token = Some(ctx.modify_token(self.token.take().unwrap()));
-                self.expiry = Some(ctx.issue_expiry());
+                self.expiry = Some(ctx.current_time() + ctx.issue_expiry());
 
                 Some(SvrMsg::DbQuery(DatabaseQuery::StoreToken { entity_id: self.svc_entity_id, token_hash: self.token.as_ref().unwrap().hash(), expiry: *self.expiry.as_ref().unwrap() }))
             }
@@ -228,7 +228,7 @@ mod tests {
     use chrono::DateTime;
     use uuid::{uuid, Uuid};
 
-    use crate::{protocol::{smachines::{common::ServerStateMachine, server::{context::ServerContext, message::{DatabaseQuery, DatabaseResponse, ServerResponse, SvrMsg}, put::PutTokenResult}}, spec::traits::TimeObj}, testing::{DummyKeyChain, DummyServerContext, ExampleProtocol, ExampleType}, token::{signature::{KeyChain, PrivateKey, PublicKey}, token::{FluidToken, TimestampToken}}};
+    use crate::{protocol::{smachines::{common::ServerStateMachine, server::{context::ServerContext, message::{DatabaseQuery, DatabaseResponse, ServerResponse, SvrMsg}, put::PutTokenResult}}, spec::{time::MsSinceEpoch}}, testing::{DummyKeyChain, DummyServerContext, ExampleProtocol, ExampleType}, token::{signature::{KeyChain, PrivateKey, PublicKey}, token::FluidToken}};
 
     use super::{PutTokenBinding, VerifyTokenState};
 
@@ -238,7 +238,7 @@ mod tests {
     pub fn test_correct_put_token_run() {
         // Set up the binding, generate & sign a token.
         let (public_key, private_key) = DummyKeyChain::generate();
-        let dummy = FluidToken::from_raw(ExampleProtocol(0), ExampleType(0), Uuid::nil(), DateTime::from_millis_since_epoch(0), [0u8; 32], [0u8; 16]);
+        let dummy = FluidToken::from_raw(ExampleProtocol(0), ExampleType(0), Uuid::nil(), MsSinceEpoch::from_timestamp_millis(0), [0u8; 32], [0u8; 16]);
         let signature = private_key.sign(&dummy.to_bytes()).unwrap();
         let mid = uuid!("3a964718-9731-4ac8-a3d0-4419917d018c");
         let mut binding: PutTokenBinding<DummyKeyChain> = PutTokenBinding::create(mid, dummy.generic().generic(), signature);
@@ -274,7 +274,7 @@ mod tests {
         if let Some(SvrMsg::DbQuery(DatabaseQuery::StoreToken { entity_id, token_hash, expiry })) = binding.poll_transmit(&ctx) {
             assert_eq!(entity_id, mid);
             assert_eq!(dummy.hash(), token_hash);
-            assert_eq!(expiry, DateTime::from_timestamp_millis(500).unwrap());
+            assert_eq!(expiry, MsSinceEpoch::from_timestamp_millis(500));
 
 
         } else {
@@ -298,7 +298,7 @@ mod tests {
         if let Poll::Ready(inner) = binding.poll_result(&ctx) {
             assert_eq!(inner.unwrap(), PutTokenResult {
                 token: dummy.generic().generic(),
-                expiry: ctx.issue_expiry()
+                expiry: ctx.current_time() + ctx.issue_expiry()
             });
         } else {
             panic!("Binding was not ready when it should have been.");

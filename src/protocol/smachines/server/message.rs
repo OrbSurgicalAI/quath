@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::{token::{signature::{B64Public, KeyChain}, token::GenericToken}};
+use crate::{protocol::spec::time::MsSinceEpoch, token::{signature::{B64Public, KeyChain}, token::GenericToken}};
 
 
 pub enum SvrMsg {
@@ -20,7 +20,7 @@ pub enum DatabaseQuery
     StoreToken {
         entity_id: Uuid,
         token_hash: [u8; 32],
-        expiry: DateTime<Utc>
+        expiry: MsSinceEpoch
     },
     CheckTokenValidity {
         token: GenericToken
@@ -38,7 +38,7 @@ pub enum DatabaseResponse
     PkDetails {
         entity_id: Uuid,
         public: B64Public,
-        last_renewal_time: DateTime<Utc>
+        last_renewal_time: MsSinceEpoch
     },
     NoEntityFound,
     StoreTokenSuccess,

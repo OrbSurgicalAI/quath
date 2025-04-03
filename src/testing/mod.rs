@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     protocol::{
-        config::Configuration, error::FluidError, smachines::server::context::ServerContext, spec::{details::Protocol, traits::{Connection, FixedByteRepr, ProtocolCtx, TimeObj}}, web::container::rfc3339::{Rfc3339, Rfc3339Str}
+        config::Configuration, error::FluidError, smachines::server::context::ServerContext, spec::{details::Protocol, time::MsSinceEpoch, traits::{Connection, FixedByteRepr, ProtocolCtx}}, web::container::rfc3339::{Rfc3339, Rfc3339Str}
     },
     token::{signature::{KeyChain, PrivateKey, PublicKey, Signature}, token::{AliveToken, FluidToken, TimestampToken}, tolerance::TokenTolerance},
 };
@@ -140,14 +140,7 @@ impl Rfc3339 for TestTimeStub {
     }
 }
 
-impl TimeObj for TestTimeStub {
-    fn from_millis_since_epoch(seconds: i64) -> Self {
-        Self { seconds }
-    }
-    fn seconds_since_epoch(&self) -> i64 {
-        self.seconds
-    }
-}
+
 
 #[derive(Arbitrary, PartialEq, Debug, Clone, Serialize)]
 pub struct ExampleProtocol(pub u8);
@@ -194,7 +187,7 @@ where
             P::arbitrary(u)?,
             T::arbitrary(u)?,
             Uuid::from_bytes_le(<[u8; 16]>::arbitrary(u)?),
-            DateTime::arbitrary(u)?,
+            MsSinceEpoch::arbitrary(u)?,
             <[u8; 32]>::arbitrary(u)?,
             <[u8; 16]>::arbitrary(u)?,
         ))
@@ -208,7 +201,7 @@ pub(crate) fn make_testing_token(
         ExampleProtocol(0),
         ExampleType(0),
         Uuid::new_v4(),
-        DateTime::from_millis_since_epoch(time),
+        MsSinceEpoch::from_timestamp_millis(time),
         [0u8; 32],
         [0u8; 16],
     );
@@ -237,8 +230,8 @@ impl TestExecutor {
 impl ProtocolCtx for TestExecutor {
     type Protocol = ExampleProtocol;
     type TokenType = ExampleType;
-    fn current_time(&self) -> DateTime<Utc> {
-        DateTime::from_timestamp_millis(self.internal_clock).unwrap()
+    fn current_time(&self) -> MsSinceEpoch {
+        MsSinceEpoch::from_timestamp_millis(self.internal_clock)
     }
     fn config(&self) -> &crate::protocol::config::Configuration {
         &self.configuration
@@ -255,13 +248,13 @@ impl ProtocolCtx for TestExecutor {
     fn get_token_type(&self) -> Self::TokenType {
         ExampleType(0)
     }
-    fn issue_expiry(&self) -> DateTime<Utc> {
-        self.current_time() + Duration::from_secs(50)
+    fn issue_expiry(&self) -> Duration {
+        Duration::from_secs(50)
     }
 }
 
 pub struct DummyServerContext {
-    pub internal_clock: DateTime<Utc>,
+    pub internal_clock: MsSinceEpoch,
     pub expiry_times: Duration,
     pub key_renewal_period: Duration,
     pub tolerance: TokenTolerance,
@@ -271,22 +264,22 @@ pub struct DummyServerContext {
 impl DummyServerContext {
     pub fn new() -> Self {
         Self {
-            internal_clock: DateTime::from_timestamp_millis(0).unwrap(),
+            internal_clock: MsSinceEpoch::from_timestamp_millis(0),
             expiry_times: Duration::ZERO,
             key_renewal_period: Duration::ZERO,
             tolerance: TokenTolerance::ZERO,
-            protocol: Protocol("")
+            protocol: Protocol::DUMMY
         }
     }
 }
 
 impl ServerContext for DummyServerContext {
     
-    fn current_time(&self) -> DateTime<Utc> {
+    fn current_time(&self) -> MsSinceEpoch {
         self.internal_clock
     }
-    fn issue_expiry(&self) -> DateTime<Utc> {
-        self.internal_clock + self.expiry_times
+    fn issue_expiry(&self) -> Duration {
+        self.expiry_times
     }
     fn key_renewal_period(&self) -> Duration {
         self.key_renewal_period

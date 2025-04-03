@@ -5,7 +5,7 @@ use rand::{Rng, RngCore};
 use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
 
-use crate::protocol::{error::FluidError, spec::traits::{FixedByteRepr, ProtocolCtx, TimeObj}};
+use crate::protocol::{error::FluidError, spec::{time::MsSinceEpoch, traits::{FixedByteRepr, ProtocolCtx}}};
 
 
 
@@ -15,18 +15,18 @@ const TIMESTAMP_RANGE: Range<usize> = 34..42;
 
 pub struct AliveToken {
     token: TimestampToken,
-    life: DateTime<Utc>
+    life: MsSinceEpoch
 }
 
 
 impl AliveToken {
-    pub fn from_raw(token: TimestampToken, life: DateTime<Utc>) -> AliveToken {
+    pub fn from_raw(token: TimestampToken, life: MsSinceEpoch) -> AliveToken {
         AliveToken { token, life }
     }
     pub fn token(&self) -> &TimestampToken {
         &self.token
     }
-    pub fn life(&self) -> &DateTime<Utc> {
+    pub fn life(&self) -> &MsSinceEpoch {
         &self.life
     }
     
@@ -44,12 +44,12 @@ pub struct FluidToken<T, P> {
     token_type: T,
     id: Uuid,
     permissions: [u8; 16],
-    timestamp: DateTime<Utc>,
+    timestamp: MsSinceEpoch,
     body: [u8; 32]
 }
 
 pub struct TimestampToken {
-    timestamp: DateTime<Utc>,
+    timestamp: MsSinceEpoch,
     data: [u8; 74]
 }
 
@@ -92,7 +92,7 @@ impl AsRef<[u8]> for TimestampToken {
 impl TimestampToken {
     pub fn random() -> Self {
         Self {
-            timestamp: DateTime::from_timestamp_nanos(0),
+            timestamp: MsSinceEpoch::ZERO,
             data: rand::rng().random()
         }
     }
@@ -101,7 +101,7 @@ impl TimestampToken {
 
 impl TimestampToken
 {
-    pub fn random_with_ts(stamp: DateTime<Utc>) -> Self{
+    pub fn random_with_ts(stamp: MsSinceEpoch) -> Self{
         let mut body: [u8; 74] = rand::rng().random();
         body[TIMESTAMP_RANGE].copy_from_slice(&stamp.to_fixed_repr());
         Self {
@@ -113,7 +113,7 @@ impl TimestampToken
 }
 
 impl TimestampToken {
-    pub fn timestamp(&self) -> &DateTime<Utc> {
+    pub fn timestamp(&self) -> &MsSinceEpoch {
         &self.timestamp
     }
     pub fn get_bytes(&self) -> &[u8; 74] {
@@ -141,7 +141,7 @@ impl TryFrom<Vec<u8>> for TimestampToken
         assert_eq!(value.len(), 74);
 
         let timestamp: [u8; 8] = value[34..42].try_into().or(Err(FluidError::FailedDeserTimestamp))?;
-        let time = DateTime::<Utc>::from_fixed_repr(timestamp);
+        let time = MsSinceEpoch::from_fixed_repr(timestamp);
         Ok(Self {
             data: value.try_into().or(Err(FluidError::FailedDeserBody))?,
             timestamp: time
@@ -210,7 +210,7 @@ where
 
 impl<T, P> FluidToken<T, P>
 {
-    pub fn from_raw(protocol: P, token_type: T, id: Uuid, timestamp: DateTime<Utc>, body: [u8; 32], permissions: [u8; 16]) -> Self {
+    pub fn from_raw(protocol: P, token_type: T, id: Uuid, timestamp: MsSinceEpoch, body: [u8; 32], permissions: [u8; 16]) -> Self {
         Self {
             protocol,
             token_type,
@@ -254,7 +254,7 @@ where
         let token_type = T::from_fixed_repr([ buffer[1] ]);
         let id = Uuid::from_bytes_le(buffer[2..18].try_into().or(Err(FluidError::FailedDeserializingId))?);
         let permissions = buffer[18..34].try_into().or(Err(FluidError::FailedDeserializingPermissions))?;
-        let timestamp = DateTime::<Utc>::from_fixed_repr(buffer[34..42].try_into().or(Err(FluidError::FailedDeserTimestamp))?);
+        let timestamp = MsSinceEpoch::from_fixed_repr(buffer[34..42].try_into().or(Err(FluidError::FailedDeserTimestamp))?);
         let body = buffer[42..].try_into().or(Err(FluidError::FailedDeserBody))?;
         
 
@@ -292,7 +292,7 @@ mod tests {
     use http::Uri;
     use sha3::{Digest, Sha3_256};
 
-    use crate::{testing::{make_testing_token, ExampleProtocol, ExampleType}, token::tolerance::TokenTolerance};
+    use crate::{protocol::spec::time::MsSinceEpoch, testing::{make_testing_token, ExampleProtocol, ExampleType}, token::tolerance::TokenTolerance};
 
     use super::FluidToken;
 
@@ -337,7 +337,7 @@ mod tests {
 
         let tolerance = TokenTolerance::new(Duration::ZERO, Duration::ZERO);
 
-        let mut current_time = DateTime::from_timestamp_millis(0).unwrap();
+        let mut current_time = MsSinceEpoch::from_timestamp_millis(0);
 
         let token = make_testing_token(0).generic().generic();
 
@@ -361,7 +361,7 @@ mod tests {
         let token = make_testing_token(0);
 
 
-        let mut clock = DateTime::from_timestamp_millis(0).unwrap();
+        let mut clock = MsSinceEpoch::from_timestamp_millis(0);
 
         let tolerance = TokenTolerance::new(Duration::from_millis(5), Duration::ZERO);
 
