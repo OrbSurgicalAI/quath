@@ -2,27 +2,77 @@ use std::ops::Deref;
 
 pub mod protocol;
 pub mod token;
+pub mod specials;
+pub mod mem;
 
-pub trait Identifier: Copy + ToBytes {
+pub trait Identifier: Copy {
     fn gen_id() -> Self;
     fn to_u128(&self) -> u128;
+    fn to_bytes(&self) -> [u8; 16] {
+        self.to_u128().to_le().to_le_bytes()
+    }
+}
+
+pub trait Signature {
+    fn view(&self) -> &[u8];
+        
+}
+
+
+/// The [PrivateKey] trait specifies how a [PrivateKey] compatible with this protocol
+/// should be implemented. This alows for the protocol to operate over a wide range
+/// of Signing/KEM algorithms.
+pub trait PrivateKey {
+    type Signature: Signature;
+    type Error;
+    /// Signs a byte sequence with the private key.
+    fn sign_bytes(&self, sequence: &[u8]) -> Result<Self::Signature, Self::Error>;
+}
+
+pub trait PublicKey
+{
+    type Signature;
+
+    /// Verifies a message was signed by the corresponding key.
+    fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool;
+
+    /// Converts the public key into a fixed representation.
+    fn view(&self) -> &[u8];
+}
+
+pub trait DsaSystem {
+    type Public: PublicKey<Signature = Self::Signature>;
+    type Private: PrivateKey<Signature = Self::Signature>;
+    type Signature: Signature;
+    type GenError;
+
+    fn generate() -> Result<(Self::Public, Self::Private), Self::GenError>;
 }
 
 pub trait SigningAlgorithm {
+
     type Signature: ToBytes;
     type PublicKey: ToBytes;
-    type PrivateKey: ToBytes;
+    type PrivateKey;
     type Error;
     
     fn generate() -> Result<(Self::PublicKey, Self::PrivateKey), Self::Error>;
-    fn sign<T: ToBytes>(sequence: &T, private: &Self::PrivateKey) -> Result<Self::Signature, Self::Error>;
-    fn verify<T: ToBytes>(sequence: &T, signature: &Self::Signature, key: &Self::PublicKey) -> bool;
+    fn sign<T: ToBytes>(sequence: &T, private: &Self::PrivateKey) -> Result<Self::Signature, Self::Error> {
+        Self::sign_bytes(&sequence.to_bytes(), private)
+    }
+    fn sign_bytes(sequence: &[u8], private: &Self::PrivateKey) -> Result<Self::Signature, Self::Error>;
+    fn verify<T: ToBytes>(sequence: &T, signature: &Self::Signature, key: &Self::PublicKey) -> bool {
+        Self::verify_bytes(sequence.to_bytes().as_ref(), signature, key)
+    }
+
+    fn verify_bytes(sequenc: &[u8], signature: &Self::Signature, key: &Self::PublicKey) -> bool;
 }
 
-pub trait HashingAlgorithm {
-    type HashResult: ToBytes;
-
-    fn hash<T: ToBytes>(buffer: &T) -> Self::HashResult;
+pub trait HashingAlgorithm<const N: usize> {
+    fn hash(buffer: &[u8]) -> [u8; N] {
+        Self::hash_sequence(&[buffer])
+    }
+    fn hash_sequence(buffer: &[&[u8]]) -> [u8; N];
 }
 
 pub trait KEMAlgorithm {
@@ -43,7 +93,7 @@ pub trait ToBytes {
 }
 
 pub trait FixedByteRepr<const N: usize> {
-    fn to_fixed_repr(self) -> [u8; N];
+    fn to_fixed_repr(&self) -> [u8; N];
 }
 
 impl<const N: usize> ToBytes for [u8; N] {

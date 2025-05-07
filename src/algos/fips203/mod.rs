@@ -22,8 +22,8 @@ impl ToBytes for ml_kem_512::CipherText {
 
 
 impl FixedByteRepr<32> for fips203::SharedSecretKey {
-    fn to_fixed_repr(self) -> [u8; 32] {
-        self.into_bytes()
+    fn to_fixed_repr(&self) -> [u8; 32] {
+        self.clone().into_bytes()
     }
 }
 impl KEMAlgorithm for ml_kem_512::KG {
@@ -53,3 +53,25 @@ impl KEMAlgorithm for ml_kem_512::KG {
 }   
 
 
+
+
+#[cfg(test)]
+mod tests {
+    use fips203::ml_kem_512::KG;
+
+    use crate::core::crypto::KEMAlgorithm;
+
+
+
+    #[test]
+    pub fn test_fips203_kem() {
+        let (dk, ek) = KG::generate(&()).unwrap();
+        let (ct, server_ss) = KG::encapsulate(&ek, &()).unwrap();
+        let client_ss = KG::decapsulate(&dk, &ct, &()).unwrap();
+
+
+
+        assert_eq!(server_ss, client_ss);
+
+    }
+}
