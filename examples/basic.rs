@@ -1,36 +1,51 @@
 
 use fips203::ml_kem_512; // Could also be ml_kem_768 or ml_kem_1024. 
 use fips203::traits::{Decaps, Encaps, KeyGen, SerDes};
+use quath::core::crypto::protocol::{MlDSA44, MlStandardLight, ProtocolKit};
+use quath::core::crypto::token::MsSinceEpoch;
+use quath::core::crypto::SigningAlgorithm;
+use uuid::Uuid;
 
 
 
 pub fn main() {
-    // Use the desired target parameter set.
     
-    // Alice runs `try_keygen()` and then serializes the encaps key `ek` for Bob (to bytes).
-    let (alice_ek, alice_dk) = ml_kem_512::KG::try_keygen().unwrap();
-    let alice_ek_bytes = alice_ek.into_bytes();
 
-    // Alice sends the encaps key `ek_bytes` to Bob.
-    let bob_ek_bytes = alice_ek_bytes;
-
-    // Bob deserializes the encaps `ek_bytes` and then runs `encaps() to get the shared 
-    // secret `ssk` and ciphertext `ct`. He serializes the ciphertext `ct` for Alice (to bytes).
-    let bob_ek = ml_kem_512::EncapsKey::try_from_bytes(bob_ek_bytes).unwrap();
-    let (bob_ssk_bytes, bob_ct) = bob_ek.try_encaps().unwrap();
-    let bob_ct_bytes = bob_ct.into_bytes();
-
-    // Bob sends the ciphertext `ct_bytes` to Alice
-    let alice_ct_bytes = bob_ct_bytes;
-
-    // Alice deserializes the ciphertext `ct` and runs `decaps()` with her decaps key
-    let alice_ct = ml_kem_512::CipherText::try_from_bytes(alice_ct_bytes).unwrap();
-    let alice_ssk_bytes = alice_dk.try_decaps(&alice_ct).unwrap();
+    let admin_id = Uuid::new_v4();
+    let (admin_pub, admin_priv) = MlDSA44::generate().unwrap();
 
 
-    println!("Bob SK: {:?}, Alice: {:?}", bob_ssk_bytes, alice_ssk_bytes);
+    let (server_pub, server_priv) = MlDSA44::generate().unwrap();
 
-    // Alice and Bob will now have the same secret key
-    assert_eq!(bob_ssk_bytes, alice_ssk_bytes);
+
+    let (
+        packet,
+        client_priv
+    ) = MlStandardLight::client_register_init(admin_id, &admin_priv).map_err(|_| "d").unwrap();
+
+
+    
+    let client_id = packet.body.1;
+
+
+    let server_register = MlStandardLight::server_register(&packet, &admin_pub, &server_priv).unwrap();
+
+    
+    let (tok, dk) = MlStandardLight::client_token_init(MsSinceEpoch(0), &client_priv, client_id, &()).map_err(|_| "").unwrap();
+
+
+    let client_token = tok.token().clone();
+
+    let (server_packet, token) = MlStandardLight::server_token(tok, &packet.body.2, &(), &server_priv).map_err(|_| "").unwrap();
+
+
+
+
+
+
+    let c = MlStandardLight::client_token_finish(&client_token, &dk, server_packet, &server_pub, &()).map_err(|_| "").unwrap();
+
+    println!("Server Token: {:?}", token);
+    println!("Client Token: {:?}", c);
 
 }
