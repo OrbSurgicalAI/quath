@@ -4,11 +4,15 @@ use core::ops::Range;
 /// registries.
 #[derive(Debug, PartialEq)]
 pub enum ProtocolError {
-    ProtocolNotExistError,
-    TriedToRegisterInReservedZone,
+    /// An access or register was attempted outside of the
+    /// protocol band space. For instance if a protocol band 
     OutOfProtocolSpace,
+    /// There is already a protocol registered with this code.
     ExistingProtocolWithCode,
+    /// There is already a protocol registered with this name.
     ExistingProtocolWithName,
+    /// Attempted to reserve a protocol band that overlaps with
+    /// the reserved area.
     IllegalStartAddress
 }
 
@@ -19,11 +23,21 @@ pub enum ProtocolError {
 ///
 /// Comparison works by comparing codes. No two protocols with different
 /// names should have the same code.
+/// 
+/// Protocols are best thought of as bands where the total reservable space is
+/// 255 protocols. We have 32 protocols reserved for a special case.
+/// 
+/// To register and work with custom protocols, you need to use a [ProtocolRegistry] object.
 #[derive(Debug, Clone, Copy)]
 pub struct Protocol {
+    /// The protocol name.
     name: &'static str,
+    /// The protocol code, this is what is actually encoded into
+    /// the token.
     code: u8,
 }
+
+
 
 impl PartialEq<Protocol> for Protocol {
     fn eq(&self, other: &Protocol) -> bool {
@@ -117,7 +131,10 @@ const DUMMY_PROTOCOL: Protocol = Protocol {
 /// Registering a new protocol will recompile the hashmap.
 #[derive(Debug)]
 pub struct ProtocolRegistry<const N: usize> {
+    /// The table of protocol slots.
     table: [Option<Protocol>; N],
+    /// The start of the protocol band. The size of the protocol band can be
+    /// found by checking the length of the table.
     start_point: usize,
 }
 
