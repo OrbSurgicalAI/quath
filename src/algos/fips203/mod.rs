@@ -1,6 +1,8 @@
 use fips203::{traits::{Decaps, Encaps, KeyGen, SerDes}, *};
 use crate::core::crypto::*;
 
+use super::parse_into_fixed_length;
+
 
 impl FixedByteRepr<32> for fips203::SharedSecretKey {
     fn to_fixed_repr(&self) -> [u8; 32] {
@@ -16,23 +18,43 @@ macro_rules! gen_fips203_kem_variant {
         /// Implementation is provided by the NCC group.
         pub struct $primary;
 
-        impl ToBytes for fips203::$module_name::EncapsKey {
-            fn to_bytes(&self) -> Vec<u8> {
-                self.clone().into_bytes().to_vec()
+        impl ViewBytes for fips203::$module_name::EncapsKey {
+            fn view(&self) -> std::borrow::Cow<'_, [u8]> {
+                std::borrow::Cow::Owned(self.clone().into_bytes().to_vec())
             }
         }
 
-        impl ToBytes for fips203::$module_name::DecapsKey {
-            fn to_bytes(&self) -> Vec<u8> {
-                self.clone().into_bytes().to_vec()
+        impl ViewBytes for fips203::$module_name::DecapsKey {
+            fn view(&self) -> std::borrow::Cow<'_, [u8]> {
+                std::borrow::Cow::Owned(self.clone().into_bytes().to_vec())
             }
         }
 
-        impl ToBytes for fips203::$module_name::CipherText {
-            fn to_bytes(&self) -> Vec<u8> {
-                self.clone().into_bytes().to_vec()
+
+        impl ViewBytes for fips203::$module_name::CipherText {
+            fn view(&self) -> std::borrow::Cow<'_, [u8]> {
+                std::borrow::Cow::Owned(self.clone().into_bytes().to_vec())
             }
         }
+
+        impl<'a> Parse<'a> for fips203::$module_name::EncapsKey {
+            type Error = &'static str;
+            fn parse_bytes(value: &'a [u8]) -> Result<Self, Self::Error> {
+                Self::try_from_bytes(parse_into_fixed_length(value)?)
+            }
+        }
+        
+
+        impl<'a> Parse<'a> for fips203::$module_name::CipherText {
+            type Error = &'static str;
+            fn parse_bytes(value: &'a [u8]) -> Result<Self, Self::Error> {
+                Self::try_from_bytes(parse_into_fixed_length(value)?)
+            }
+        }
+
+        
+        
+        
 
         impl KEMAlgorithm for fips203::$module_name::KG {
             type EncapsulationKey = fips203::$module_name::EncapsKey;
@@ -59,6 +81,19 @@ macro_rules! gen_fips203_kem_variant {
                Ok(ss)
             }
         }
+    }
+}
+
+impl<'a> Parse<'a> for fips203::SharedSecretKey {
+    type Error = &'static str;
+    fn parse_bytes(value: &'a [u8]) -> Result<Self, Self::Error> {
+        Self::try_from_bytes(parse_into_fixed_length(value)?)
+    }
+}
+
+impl ViewBytes for fips203::SharedSecretKey {
+    fn view<'a>(&'a self) -> std::borrow::Cow<'a, [u8]> {
+        self.clone().into_bytes().to_vec().into()
     }
 }
 

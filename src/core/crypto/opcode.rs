@@ -10,15 +10,7 @@ pub enum OpCode {
     Stamped,
 }
 
-trait MyTrait {
-    fn do_something(&self);
-}
 
-impl<T: std::fmt::Debug> MyTrait for T {
-    fn do_something(&self) {
-        println!("{:?}", self);
-    }
-}
 
 impl OpCode {
     pub fn to_code(&self) -> u8 {

@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{borrow::Cow, fmt::Display};
 
 pub mod protocol;
 pub mod token;
@@ -6,18 +6,18 @@ pub mod specials;
 pub mod mem;
 pub mod opcode;
 
-pub trait Identifier: Copy {
-    fn gen_id() -> Self;
-    fn to_u128(&self) -> u128;
-    fn to_bytes(&self) -> [u8; 16] {
-        self.to_u128().to_le().to_le_bytes()
-    }
-}
+pub mod data;
 
-pub trait Signature {
-    fn view(&self) -> &[u8];
+use crate::algos::parse_into_fixed_length;
+pub use crate::core::crypto::data::*;
+
+
+
+pub trait Signature: ViewBytes + for<'a> Parse<'a> {
     fn from_byte(seq: &[u8]) -> Self;
 }
+
+
 
 
 
@@ -32,15 +32,12 @@ pub trait PrivateKey {
     fn sign_bytes(&self, sequence: &[u8]) -> Result<Self::Signature, Self::Error>;
 }
 
-pub trait PublicKey
+pub trait PublicKey: ViewBytes + for<'a> Parse<'a>
 {
     type Signature;
 
     /// Verifies a message was signed by the corresponding key.
     fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool;
-
-    /// Converts the public key into a fixed representation.
-    fn view(&self) -> &[u8];
 }
 
 pub trait DsaSystem {
@@ -52,24 +49,7 @@ pub trait DsaSystem {
     fn generate() -> Result<(Self::Public, Self::Private), Self::GenError>;
 }
 
-pub trait SigningAlgorithm {
 
-    type Signature: ToBytes;
-    type PublicKey: ToBytes;
-    type PrivateKey;
-    type Error;
-    
-    fn generate() -> Result<(Self::PublicKey, Self::PrivateKey), Self::Error>;
-    fn sign<T: ToBytes>(sequence: &T, private: &Self::PrivateKey) -> Result<Self::Signature, Self::Error> {
-        Self::sign_bytes(&sequence.to_bytes(), private)
-    }
-    fn sign_bytes(sequence: &[u8], private: &Self::PrivateKey) -> Result<Self::Signature, Self::Error>;
-    fn verify<T: ToBytes>(sequence: &T, signature: &Self::Signature, key: &Self::PublicKey) -> bool {
-        Self::verify_bytes(sequence.to_bytes().as_ref(), signature, key)
-    }
-
-    fn verify_bytes(sequenc: &[u8], signature: &Self::Signature, key: &Self::PublicKey) -> bool;
-}
 
 pub trait HashingAlgorithm<const N: usize> {
     fn hash(buffer: &[u8]) -> [u8; N] {
@@ -80,10 +60,10 @@ pub trait HashingAlgorithm<const N: usize> {
 
 pub trait KEMAlgorithm {
     type Context;
-    type DecapsulationKey: ToBytes;
-    type EncapsulationKey: ToBytes;
-    type CipherText: ToBytes;
-    type SharedSecret: FixedByteRepr<32>;
+    type DecapsulationKey;
+    type EncapsulationKey: ViewBytes + for<'a> Parse<'a>;
+    type CipherText: ViewBytes + for<'a> Parse<'a>;
+    type SharedSecret: FixedByteRepr<32> + ViewBytes + for<'a> Parse<'a>;
     type Error;
 
     fn generate(context: &Self::Context) -> Result<(Self::DecapsulationKey, Self::EncapsulationKey), Self::Error>;
@@ -91,100 +71,47 @@ pub trait KEMAlgorithm {
     fn decapsulate(decap_key: &Self::DecapsulationKey, cipher: &Self::CipherText, context: &Self::Context) -> Result<Self::SharedSecret, Self::Error>;
 }
 
-pub trait ToBytes {
-    fn to_bytes(&self) -> Vec<u8>;
+
+
+pub trait Parse<'a>: Sized {
+    type Error: Display;
+    fn parse_bytes(array: &'a [u8]) -> Result<Self, Self::Error>;
+}
+
+impl<'a, const N: usize> Parse<'a> for [u8; N] {
+    type Error = &'static str;
+    fn parse_bytes(array: &'a [u8]) -> Result<Self, Self::Error> {
+        parse_into_fixed_length(array)
+    }
+}
+
+/// Returns a view into the underlying bytes of the
+/// object. Some cryptographic implementations may
+/// not allow peering into the bytes by reference
+/// and thus we allow returning a [Cow] in order to
+/// return owned values.
+pub trait ViewBytes {
+    
+    fn view<'a>(&'a self) -> Cow<'a, [u8]>;
+}
+
+
+
+impl<const N: usize> ViewBytes for [u8; N] {
+    fn view<'a>(&'a self) -> Cow<'a, [u8]> {
+        Cow::Borrowed(self)
+    }
+}
+
+impl<const N: usize> Signature for [u8; N] {
+    fn from_byte(seq: &[u8]) -> Self {
+        seq.try_into().unwrap()
+    }
 }
 
 pub trait FixedByteRepr<const N: usize> {
     fn to_fixed_repr(&self) -> [u8; N];
 }
 
-impl<const N: usize> ToBytes for [u8; N] {
-    fn to_bytes(&self) -> Vec<u8> {
-        self.to_vec()
-    }
-}
 
-#[derive(Debug)]
-pub struct Signable<T> {
-    inner: T
-}
 
-impl<T> Signable<T>
-where 
-    T: ToBytes
-{
-    pub fn new(inner: T) -> Self {
-        Self {
-            inner
-        }
-    }
-    pub fn into_inner(self) -> T {
-        self.inner
-    }
-}
-
-impl<T: ToBytes> ToBytes for Signable<T> {
-    fn to_bytes(&self) -> Vec<u8> {
-        self.inner.to_bytes()
-    }
-}
-
-impl<T> Deref for Signable<T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T1, T2, T3, T4> ToBytes for (T1, T2, T3, T4)
-where 
-    T1: ToBytes,
-    T2: ToBytes,
-    T3: ToBytes,
-    T4: ToBytes
-{
-
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = self.0.to_bytes();
-        buffer.append(self.1.to_bytes().as_mut());
-        buffer.append(self.2.to_bytes().as_mut());
-        buffer.append(self.3.to_bytes().as_mut());
-        buffer
-    }
-}
-
-impl<T1, T2, T3> ToBytes for (T1, T2, T3)
-where 
-    T1: ToBytes,
-    T2: ToBytes,
-    T3: ToBytes,
-{
-
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = self.0.to_bytes();
-        buffer.append(self.1.to_bytes().as_mut());
-        buffer.append(self.2.to_bytes().as_mut());
-
-        buffer
-    }
-}
-
-impl<T: ToBytes> ToBytes for &T {
-    fn to_bytes(&self) -> Vec<u8> {
-        <T as ToBytes>::to_bytes(self)
-    }
-}
-
-impl<T1, T2> ToBytes for (T1, T2)
-where 
-    T1: ToBytes,
-    T2: ToBytes,
-{
-
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = self.0.to_bytes();
-        buffer.append(self.1.to_bytes().as_mut());
-        buffer
-    }
-}

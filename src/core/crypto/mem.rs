@@ -2,14 +2,18 @@ use std::ops::Deref;
 
 use zeroize::{Zeroize, Zeroizing};
 
+use super::{Signature, ViewBytes};
 
 
-#[derive(PartialEq, Eq, Clone, Debug)]
-#[repr(transparent)]
-pub struct Hash<const N: usize>(pub [u8; N]);
 
-impl<const N: usize> Deref for Hash<N> {
-    type Target = [u8; N];
+
+
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct B64<T>(pub T);
+
+impl<T> Deref for B64<T> {
+    type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.0
     }

@@ -2,7 +2,7 @@ use std::{fmt::Debug, time::Duration};
 
 use arbitrary::Arbitrary;
 
-use crate::core::crypto::{DsaSystem, PrivateKey, PublicKey, SigningAlgorithm};
+use crate::core::crypto::{DsaSystem, PrivateKey, PublicKey};
 
 pub const ARBTEST_DURATION: Duration = Duration::from_secs(2);
 

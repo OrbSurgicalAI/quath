@@ -1,8 +1,9 @@
 use fips203::ml_kem_1024;
-use fips204::{ml_dsa_44, ml_dsa_65, ml_dsa_87, traits::{KeyGen, SerDes, Signer, Verifier}};
+use fips204::{ml_dsa_44::{self, PublicKey}, ml_dsa_65, ml_dsa_87, traits::{KeyGen, SerDes, Signer, Verifier}};
 use fips205::{slh_dsa_sha2_128f, slh_dsa_sha2_128s};
 use rand::seq;
 
+use crate::algos::parse_into_fixed_length;
 
 
 
@@ -84,6 +85,23 @@ macro_rules! new_fips204_spec {
             }
         }
 
+        impl crate::core::crypto::ViewBytes for $pk_name {
+            fn view(&self) -> std::borrow::Cow<'_, [u8]> {
+                std::borrow::Cow::Borrowed(&self.0)
+            }
+        }
+
+        impl<'a> crate::core::crypto::Parse<'a> for $pk_name {
+            type Error = &'static str;
+            fn parse_bytes(value: &'a [u8]) -> Result<Self, Self::Error> {
+                let array = parse_into_fixed_length(value)?;
+                let key = $mod_name::PublicKey::try_from_bytes(array)?;
+                Ok($pk_name(key.into_bytes()))
+            }
+        }
+        
+        
+
         impl crate::core::crypto::PublicKey for $pk_name {
             type Signature =  [u8; { $mod_name::SIG_LEN }];
         
@@ -91,19 +109,6 @@ macro_rules! new_fips204_spec {
         
             fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool {
                 $mod_name::PublicKey::try_from_bytes(self.0).unwrap().verify(message, signature, &[])
-            }
-            fn view(&self) -> &[u8] {
-                &self.0
-            }
-        }
-
-
-        impl crate::core::crypto::Signature for [u8; { $mod_name::SIG_LEN }] {
-            fn view(&self) -> &[u8] {
-                self
-            }
-            fn from_byte(buf: &[u8]) -> Self {
-                buf.clone().try_into().unwrap()
             }
         }
 
@@ -132,6 +137,9 @@ macro_rules! new_fips204_spec {
 
     };
 }
+
+
+
 
 
 

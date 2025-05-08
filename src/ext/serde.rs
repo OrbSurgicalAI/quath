@@ -1,15 +1,25 @@
-use std::{borrow::Cow, marker::PhantomData};
+use std::{borrow::Cow, fmt::{Debug, Display}, marker::PhantomData, ops::Deref};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
+use chrono::DateTime;
 use serde::{de::Visitor, Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::core::crypto::{mem::Hash, opcode::OpCode, protocol::SigWrapper, Signature};
+use crate::core::crypto::{mem::B64, opcode::OpCode, token::MsSinceEpoch, Parse, Signature, ViewBytes};
+
+
+// #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+// #[repr(transparent)]
+// struct Cv<V: ToBytes>()
+
 
 #[derive(PartialEq, Eq, Debug)]
 #[repr(transparent)]
 struct InternalB64SerContainer<'a>(Cow<'a, [u8]>);
 
 struct B64Visitor;
+
+
 
 
 
@@ -75,53 +85,39 @@ impl<'de> Deserialize<'de> for InternalB64SerContainer<'de> {
     }
 }
 
+/* B64 Wrapper */
 
 
-/* Signature Wrapper */
-
-impl<T: Signature> Serialize for SigWrapper<T> {
+impl<T: ViewBytes> Serialize for B64<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer {
-        let container = InternalB64SerContainer(Cow::Borrowed(self.0.view()));
-        container.serialize(serializer)
+        InternalB64SerContainer(self.0.view()).serialize(serializer)
     }
 }
 
-impl<'de, T: Signature> Deserialize<'de> for SigWrapper<T> {
-    
+
+
+impl<'de, T> Deserialize<'de> for B64<T>
+where 
+    T: ViewBytes,
+    for<'a> T: Parse<'a>,
+    for<'a> <T as Parse<'a>>::Error: Display,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
-            D: serde::Deserializer<'de>
-        {
+            D: serde::Deserializer<'de> {
+        let InternalB64SerContainer(inner) = InternalB64SerContainer::deserialize(deserializer)?;
+        let wow = T::parse_bytes(&*inner).map_err(serde::de::Error::custom)?;
 
-        let container = InternalB64SerContainer::deserialize(deserializer)?;
-        Ok(SigWrapper(T::from_byte(&*container.0)))
+        Ok(B64(wow))
+
     }
 }
 
 
-/* Hash Wrapper */
-impl<const N: usize> Serialize for Hash<N> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
-        let container = InternalB64SerContainer(Cow::Borrowed(&self.0));
-        container.serialize(serializer)
-    }
-}
 
-impl<'de, const N: usize> Deserialize<'de> for Hash<N> {
-    
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>
-        {
 
-        let container = InternalB64SerContainer::deserialize(deserializer)?;
-        Ok(Hash((*container.0).try_into().unwrap()))
-    }
-}
 
 
 /* OPCODE SERDE IMPLEMENTATIONS */
@@ -224,6 +220,55 @@ impl<'de> Deserialize<'de> for OpCode {
 }
 
 
+/* Identifier Serde */
+
+/* Milliseconds Since Epoch */
+impl Serialize for MsSinceEpoch {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        if serializer.is_human_readable() {
+            DateTime::from_timestamp_millis(self.0).unwrap().serialize(serializer)
+        } else {
+            serializer.serialize_i64(self.0)
+        }
+        
+    }
+}
+
+struct MsSinceEpochVisitor;
+
+impl<'v> Visitor<'v> for MsSinceEpochVisitor {
+    type Value = MsSinceEpoch;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("milliseconds since epoch")
+    }
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error, {
+        let value = DateTime::parse_from_rfc3339(&v).map_err(E::custom)?;
+        Ok(MsSinceEpoch(value.timestamp_millis()))
+    }
+}
+
+impl<'de> Deserialize<'de> for MsSinceEpoch {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de> {
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(MsSinceEpochVisitor)
+        } else {
+            Ok(MsSinceEpoch(i64::deserialize(deserializer)?))
+        }
+    }
+}
+
+
+// impl<'v, I: Identifier> Visitor<'v, I> for IdVisitor<'v, I> {
+    
+
+// }
 
 
 #[cfg(test)]
@@ -232,24 +277,19 @@ mod tests {
 
     use serde::{Deserialize, Serialize, Serializer};
     use serde_test::{assert_ser_tokens, assert_tokens, Configure, Token};
+    use uuid::{uuid, Uuid};
 
-    use crate::core::crypto::{mem::Hash, opcode::OpCode, protocol::SigWrapper, Signature};
+    use crate::core::crypto::{mem::B64, opcode::OpCode, token::MsSinceEpoch, ServerCycleBody, Signature, ViewBytes};
 
     use super::InternalB64SerContainer;
 
 
-    impl Signature for [u8; 3] {
-        fn from_byte(seq: &[u8]) -> Self {
-            seq.try_into().unwrap()
-        }
-        fn view(&self) -> &[u8] {
-            self as &[u8]
-        }
-    }
+    
+
 
     #[derive(serde::Serialize, Deserialize)]
     pub struct Stub {
-        field: SigWrapper<[u8; 3]>
+        field: B64<[u8; 3]>
     }
 
     #[test]
@@ -260,7 +300,7 @@ mod tests {
 
         
         let result = serde_json::to_string(&Stub {
-            field: SigWrapper([1, 2, 3])
+            field: B64([1, 2, 3])
         }).unwrap();
 
         assert_eq!(result, "{\"field\":\"AQID\"}");
@@ -291,10 +331,10 @@ mod tests {
     #[test]
     pub fn test_serde_basic() {
 
-        let sig = SigWrapper([1, 2, 3]);
+        let sig = B64([1, 2, 3]);
 
     
-        assert_tokens(&SigWrapper([1, 2, 3]).compact(), &[
+        assert_tokens(&B64([1, 2, 3]).compact(), &[
             Token::Seq { len: Some(3) },
             Token::U8(1),
             Token::U8(2),
@@ -310,7 +350,7 @@ mod tests {
     #[test]
     pub fn test_serde_empty() {
 
-        let sig = SigWrapper([]);
+        let sig = B64([]);
 
     
         assert_tokens(&sig.clone().compact(), &[
@@ -344,19 +384,71 @@ mod tests {
 
     #[test]
     pub fn test_serde_hash() {
-        assert_tokens(&Hash([1, 2, 3]).compact(), &[
+        assert_tokens(&B64([1, 2, 3]).compact(), &[
             Token::Seq { len: Some(3) },
             Token::U8(1),
             Token::U8(2),
             Token::U8(3),
             Token::SeqEnd
         ]);
-        assert_tokens(&Hash([]).compact(), &[
+        assert_tokens(&B64([]).compact(), &[
             Token::Seq { len: Some(0) },
             Token::SeqEnd
         ]);
-        assert_tokens(&Hash([1, 2, 3]).readable(), &[
+        assert_tokens(&B64([1, 2, 3]).readable(), &[
             Token::Str("AQID")
+        ]);
+    }
+
+    #[test]
+    pub fn test_serde_server_cycle_body() {
+
+      
+
+        assert_tokens(&ServerCycleBody {
+            code: OpCode::Register,
+            hash: B64([1, 2, 3])
+        }.readable(), &[
+            Token::Struct { name: "ServerCycleBody", len: 2},
+            Token::Str("code"),
+            Token::Str("Register"),
+            Token::Str("hash"),
+            Token::Str("AQID"),
+            Token::StructEnd
+        ]);
+
+        assert_tokens(&ServerCycleBody {
+            code: OpCode::Register,
+            hash: B64([1, 2, 3])
+        }.compact(), &[
+            Token::Struct { name: "ServerCycleBody", len: 2},
+            Token::Str("code"),
+            Token::U8(0),
+            Token::Str("hash"),
+            Token::Seq { len: Some(3) },
+            Token::U8(1),
+            Token::U8(2),
+            Token::U8(3),
+            Token::SeqEnd,
+            Token::StructEnd
+        ]);
+    }
+
+
+
+
+
+
+  
+
+
+    #[test]
+    pub fn test_serde_ms_since_epoch() {
+        assert_tokens(&MsSinceEpoch(12).readable(), &[
+            Token::Str("1970-01-01T00:00:00.012Z")
+        ]);
+        assert_tokens(&MsSinceEpoch(12).compact(), &[
+            Token::I64(12)
         ]);
     }
 }

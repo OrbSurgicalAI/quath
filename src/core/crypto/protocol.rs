@@ -8,111 +8,165 @@ use uuid::Uuid;
 
 
 use super::{
-    opcode::OpCode, token::{Final, MsSinceEpoch, Pending, Token}, DsaSystem, FixedByteRepr, HashingAlgorithm, Identifier, KEMAlgorithm, PrivateKey, PublicKey, Signable, Signature, SigningAlgorithm, ToBytes
+    mem::B64, opcode::OpCode, token::{Final, MsSinceEpoch, Pending, Token}, ClientRegisterInit, DsaSystem, FixedByteRepr, HashingAlgorithm, KEMAlgorithm, PrivateKey, PublicKey, Signature, ViewBytes
 };
 
 
+use super::data::*;
 
 
-pub type UniformSignedProtocol<S, K, H, I, const H_SIZE: usize> = ProtocolKit<S, K, H, I, S, H_SIZE>;
+pub type UniformSignedProtocol<S, K, H, const H_SIZE: usize> = ProtocolKit<S, K, H, S, H_SIZE>;
 
-pub struct ProtocolKit<S, K, H, I, A, const HASH_SIZE: usize> {
+pub struct ProtocolKit<S, K, H, A, const HASH_SIZE: usize> {
     _s: PhantomData<S>,
     _k: PhantomData<K>,
     _h: PhantomData<H>,
-    _i: PhantomData<I>,
     _a: PhantomData<A>,
     _hashsize: PhantomData<[u8; HASH_SIZE]>,
 }
 
-impl<S, K, H, I, A, const HASH_SIZE: usize> ProtocolKit<S, K, H, I, A, HASH_SIZE>
+impl<S, K, H, A, const HASH_SIZE: usize> ProtocolKit<S, K, H, A, HASH_SIZE>
 where
     S: DsaSystem,
     K: KEMAlgorithm,
     H: HashingAlgorithm<HASH_SIZE>,
-    I: Identifier,
     A: DsaSystem,
 {
+    /// Initiates client registration. We start by proposing a new [Uuid], which the server
+    /// will only approve if it is unique. We then provide two proofs:
+    /// 
+    /// 1. The first proof states that we do actually own the key. Although this is not
+    /// strictly a necessary security condition, it prevents clients from registering null entities.
+    /// 
+    /// 2. The second proof states that the administrator actually approves of this rquest.
+    /// 
+    /// The output in terms of state is the private key. The client only needs to store
+    /// the [Uuid] and the [PrivateKey].
     pub fn client_register_init(
-        admin_id: I,
+        client_id: Uuid,
+        admin_id: Uuid,
         admin_priv: &A::Private,
-    ) -> Result<(ClientRegisterInit<S, A, I>, S::Private), ClientRegisterError<S>> {
-        let (public, private) = S::generate().map_err(|e| ClientRegisterError::KeyGenError(e))?;
+    ) -> Result<(ClientRegisterInit<S::Public, S::Signature, A::Signature>, S::Private), ClientProtocolError> {
+        let (public, private) = S::generate().map_err(|e| ClientProtocolError::FailedToGenerateDsaPair)?;
 
+
+        
+        // Form the request body.
         let body = ClientRegisterPost {
             code: OpCode::Register,
-            identifier: I::gen_id(),
-            public_key: public,
-            admin_approval_id: admin_id.clone(),
+            identifier: client_id,
+            public_key: B64(public),
+            admin_approval_id: admin_id
         };
 
         // Create the client signature to prove key ownership.
         let k_proof = private
             .sign_bytes(&body.bytes())
-            .map_err(|_| ClientRegisterError::KProofSignFailure)?;
+            .map_err(|_| ClientProtocolError::KProofSignError)?;
 
         // Create the administrator signature.
         let a_proof = admin_priv
-            .sign_bytes(k_proof.view())
-            .map_err(|_| ClientRegisterError::AProofSignFailure)?;
+            .sign_bytes(&k_proof.view())
+            .map_err(|_| ClientProtocolError::AProofSignError)?;
 
         Ok((
             ClientRegisterInit {
                 body,
-                k_proof,
-                a_proof,
+                k_proof: B64(k_proof),
+                a_proof: B64(a_proof),
             },
             private,
         ))
     }
+    /// The server register method takes in the client request and performs several checks. The primary
+    /// purpose of this method is to verify that the client is legitimate. The checks are as follows:
+    /// 
+    /// 1. The client's k-proof, which is the proof used to show they own the key they want to submit
+    /// is verifiable with the public key that was submitted. Hence implying they do actually own this
+    /// private key.
+    /// 
+    /// 2. The client's ID is unique. This is actually a precondition of this function call, this function
+    /// call makes no assumptions about the backend and thus cannot verify that.
+    /// 
+    /// 3. The client's public key is unique. 
+    /// 
+    /// The parameters of this method include the actual request, the correspondng admin public key, and the
+    /// server key that will be used to sign this request.
+    /// 
+    /// # Preconditions
+    /// The client ID is unique.
+    /// The client PK is unique.
     pub fn server_register(
-        client: &ClientRegisterInit<S, A, I>,
+        client: &ClientRegisterInit<S::Public, S::Signature, A::Signature>,
         admin_public_key: &A::Public,
         server_key: &S::Private,
     ) -> Result<ServerRegister<S::Signature, HASH_SIZE>, ServerProtocolError> {
         if !client
             .body
             .public_key
-            .verify(&client.body.bytes(), &client.k_proof)
+            .verify(&*client.body.bytes(), &*client.k_proof)
         {
             return Err(ServerProtocolError::FailedToVerifyKProof);
         }
 
-        println!("FLAG A.2");
 
-        if !admin_public_key.verify(client.k_proof.view(), &client.a_proof) {
-            return Err(ServerProtocolError::FailedToVeifyAProof);
+
+        // Verify that the administrator actually made this request.
+        if !admin_public_key.verify(&client.k_proof.view(), &client.a_proof) {
+            return Err(ServerProtocolError::FailedToVerifyAProof);
         }
 
-        println!("FLAG A.3");
+     
 
         // Create the response.
         let body = ServerRegisterBody {
             code: OpCode::RegSuccess,
-            identity_hash: H::hash(&client.body.identifier.to_bytes()),
+            identity_hash: B64(H::hash(&client.body.identifier.to_bytes_le())),
         };
 
-        println!("FLAG A.4");
+
 
         // We now need to sign the response with the key.
         let signature = server_key
             .sign_bytes(&body.to_bytes())
             .map_err(|_| ServerProtocolError::FailedToSignResponse)?;
 
-        println!("FLAG A.5");
-
-        Ok(ServerRegister { body, signature })
+        Ok(ServerRegister { body, signature:B64(signature ) })
     }
+    /// This method is the termination of the client 
     pub fn client_register_finish(
         in_resp: ServerRegister<S::Signature, HASH_SIZE>,
+        client_id: Uuid,
         server_public: &S::Public,
-    ) -> bool {
-        server_public.verify(&in_resp.body.to_bytes(), &in_resp.signature)
+    ) -> Result<(), ClientProtocolError> {
+
+        // Verify the hash is actually correct by calculating it against
+        // our stored client ID.
+        if H::hash(&client_id.to_bytes_le()) != *in_resp.body.identity_hash {
+            return Err(ClientProtocolError::FailedToVerifyIdentityHash);
+        }
+
+        // Verify the server actually signe this message.
+        if !server_public.verify(&in_resp.body.to_bytes(), &in_resp.signature) {
+            return Err(ClientProtocolError::InauthenticRegisterResponse);
+        }
+
+
+        Ok(())
     }
+
+    /// Initializes a cycle on the client's end. To do so, we need the client [Uuid] and the current
+    /// private key. This will perform the following steps.
+    /// 1. Generate a new key pair.
+    /// 2. Generate a response.
+    /// 3. Sign the response with the new key.
+    /// 4. Sign the previous signature with the old key.
+    /// This format of proof is identical to the registration step, except that the client authorizes
+    /// on it's own behalf.
     pub fn client_cycle_init(
-        client_id: I,
+        client_id: Uuid,
         old_private: &S::Private,
-    ) -> Result<(CycleInit<I, S::Public, S::Signature>, S::Private), ClientProtocolError> {
+    ) -> Result<(CycleInit<S::Public, S::Signature>, S::Private), ClientProtocolError> {
 
         // Generate the new key pair.
         let (new_public, new_private) = S::generate()
@@ -123,68 +177,118 @@ where
         let body = CycleInitBody {
             code: OpCode::Cycle,
             identifier: client_id,
-            new_public_key: new_public
+            new_public_key: B64(new_public)
         };
 
-        // The actual signature of the cycle request.
-        let signature = old_private.sign_bytes(&body.to_bytes())
+        // The proof from the new key.
+        let new_proof = new_private.sign_bytes(&body.to_bytes())
+            .map_err(|_| ClientProtocolError::FailedToSignRequest)?;
+
+        // The proof from the old key.
+        let original_proof = old_private.sign_bytes(&new_proof.view())
             .map_err(|_| ClientProtocolError::FailedToSignRequest)?;
 
 
 
-        Ok((CycleInit { body, signature }, new_private))
+        Ok((CycleInit { 
+            body,
+            new_proof: B64(new_proof),
+            original_proof: B64(original_proof)
+         }, new_private))
     }
+    /// This function represents the Server's response to the client's initiation of a cycle.
+    /// 
+    /// This will verify that the signatures are legitimate (the message is proven) and additionally
+    /// generate a response that includes a hash of the identity and the new public key to differentiate
+    /// it from previous requests, sign this, and then send it back to the client.
+    /// 
+    /// # Preconditions
+    /// The new key must be unique.
     pub fn server_cycle(
-        in_msg: CycleInit<I, S::Public, S::Signature>,
+        in_msg: CycleInit<S::Public, S::Signature>,
         client_public: &S::Public,
         server_private: &S::Private,
     ) -> Result<ServerCycle<HASH_SIZE, S::Signature>, ServerProtocolError> {
 
-        if !client_public.verify(&in_msg.body.to_bytes(), &in_msg.signature) {
-            return Err(ServerProtocolError::FailedToVerifyCycleReq);
+        // We need to check that the client actually owns the new
+        // key being proposed.
+        if !in_msg.body.new_public_key.verify(&in_msg.body.to_bytes(), &in_msg.new_proof) {
+            return Err(ServerProtocolError::FailedToVerifyNewCycleKey)?;
+
+        }
+
+        // We need to check the old key approves.
+        if !client_public.verify(&in_msg.new_proof.view(), &in_msg.original_proof) {
+            return Err(ServerProtocolError::FailedToVerifyOldKeyDuringCycle);
         }
 
        
-
-
+        // Produce the response.
         let body = ServerCycleBody {
             code: OpCode::CycleOk,
-            hash: H::hash(&in_msg.body.identifier.to_bytes().into_iter().chain(in_msg.body.new_public_key.view().into_iter().copied()).collect::<Vec<_>>())
+            hash: B64(H::hash_sequence(&[ (&in_msg.body.identifier.to_bytes_le()) as &[u8], &in_msg.body.new_public_key.view() ]))
         };
 
+        // Sign the body.
         let signature = server_private.sign_bytes(&body.to_bytes())
             .map_err(|_| ServerProtocolError::FailedToSignResponse)?;
        
        
         Ok(ServerCycle {
             body,
-            signature,
+            signature: B64(signature),
         })
     }
+    /// This method is how the client terminates the cycling process. The client will perform the following steps.
+    /// 1. Verify that the hash provided by the server corresponds to the actual request that was made.
+    /// 2. 
     pub fn client_cycle_finish(
         in_msg: ServerCycle<HASH_SIZE, S::Signature>,
+        client_id: Uuid,
+        proposed_public_key: &S::Public,
         server_public: &S::Public,
     ) -> Result<(), ClientProtocolError> {
 
+        // Calculate the hash to verify that it actually corresponds to that of the server.
+        let calculated = H::hash_sequence(&[ &client_id.to_bytes_le(), &proposed_public_key.view() ]);
+
+
+        // Verify the hashes coincide.
+        if *in_msg.body.hash != calculated {
+            return Err(ClientProtocolError::FailedToVerifyCycleHash);
+        }
+
+        // Verify the key signing.
         if !server_public.verify(&in_msg.body.to_bytes(), &in_msg.signature) {
             return Err(ClientProtocolError::InauthenticCycleResponse);
         }
 
-   
-
         Ok(())
     }
-
-    pub fn client_token_init(
+    /// Initiaizes a client token request. This requires several pieces of informaton such as the current
+    /// time, the client private key, and additionally the [KEMAlgorithm] context, which may be empty for
+    /// many KEMs.
+    /// 
+    /// This will perform the following operations:
+    /// 1. Generate the KEM (dk, ek). The encapsulation key is packaged and will be sent to the server.
+    /// 2. Formulate the token according to the parameters given.
+    /// 3. Sign the token with the current client private key.
+    pub fn client_token_init<F>(
+        protocol: u8,
+        sub_protocol: u8,
         current_time: MsSinceEpoch,
         client_pk: &S::Private,
-        client_id: I,
+        client_id: Uuid,
         context: &K::Context,
-    ) -> Result<(ClientToken<S::Signature, K>, K::DecapsulationKey), ClientProtocolError> {
+    ) -> Result<(ClientToken<S::Signature, K>, K::DecapsulationKey), ClientProtocolError>
+    where   
+        F: FnMut(&mut Token<Pending>)
+    {
+        // Create the pending token, this involves generating a random body.
         let token = Token {
-            protocol: 0,
-            sub_protocol: 0,
-            id: client_id.to_u128(),
+            protocol,
+            sub_protocol,
+            id: client_id,
             permissions: BitArray::new([0u8; 16]),
             timestamp: current_time,
             body: rand::rng().random(),
@@ -198,8 +302,8 @@ where
         // Build the request body.
         let body = ClientTokenBody {
             code: OpCode::Stamp,
-            token,
-            ek
+            token: B64(token),
+            ek: B64(ek)
         };
 
         // Sign the request body.
@@ -207,8 +311,16 @@ where
             .map_err(|_| ClientProtocolError::FailedToSignRequest)?;
 
        
-        Ok((ClientToken { body, signature }, dk))
+        Ok((ClientToken { body, signature: B64(signature) }, dk))
     }
+
+    /// The server response to the client token request. This will perform the following steps:
+    /// 1. Verify the client sent this request.
+    /// 2. Produce the shared secret, and thus, finalize the token. 
+    /// 3. Produce and sign a response to the client.
+    /// 
+    /// NOTE: The server should _not_ store the final token as is, it must
+    /// be hashed first!
     pub fn server_token(
         ClientToken { body, signature }: ClientToken<S::Signature, K>,
         client_pk: &S::Public,
@@ -216,6 +328,9 @@ where
         server_key: &S::Private,
     ) -> Result<(ServerToken<HASH_SIZE, K, S::Signature>, Token<Final>), ServerProtocolError> {
 
+
+
+        // Verify the client actually sent this request.
         if !client_pk.verify(&body.to_bytes(), &signature) {
             return Err(ServerProtocolError::FailedToVerifyTokenSignature)?;
         }
@@ -231,13 +346,13 @@ where
         let new_token = body.token.update_with_shared_secret::<K>(shared_secret);
 
         // Generate the approval hash.
-        let approval = H::hash_sequence(&[ &new_token.to_bytes(), &body.token.to_bytes() ]);
+        let approval = H::hash_sequence(&[ &new_token.view(), &body.token.view() ]);
 
         // Create the response body.
         let body = ServerTokenBody {
             code: OpCode::Stamped,
-            cipher_text,
-            hash: approval
+            cipher_text: B64(cipher_text),
+            hash: B64(approval)
         };
 
         // Sign the response body with the server private key.
@@ -245,8 +360,12 @@ where
             .map_err(|_| ServerProtocolError::FailedToSignResponse)?;
        
      
-        Ok((ServerToken { body, signature }, new_token))
+        Ok((ServerToken { body, signature: B64(signature) }, new_token))
     }
+
+    /// Terminates the token request on the client's side. This will perform a few
+    /// veriifcations to verify the correctness and authenticity of the request,
+    /// and then will create the final token.
     pub fn client_token_finish(
         token: &Token<Pending>,
         decap_key: &K::DecapsulationKey,
@@ -256,6 +375,7 @@ where
     ) -> Result<Token<Final>, ClientProtocolError> {
 
 
+      
         // Verify the body hash.
         if !server_pk.verify(&body.to_bytes(), &signature) {
             return Err(ClientProtocolError::InauthenticTokenResponse);
@@ -265,259 +385,72 @@ where
         let shared_secret = K::decapsulate(decap_key, &body.cipher_text, ctx)
             .map_err(|_| ClientProtocolError::DecapsulationError)?;
 
+        // Calculate the approval hash.
+        let new_token = token.update_with_shared_secret::<K>(shared_secret);
+
+
+        // Calculate the approval hash
+        let c_approval_hash = H::hash_sequence(&[ &new_token.view(), &token.view() ]);
+        if c_approval_hash != *body.hash {
+            return Err(ClientProtocolError::FailedToReconstructApprovalHash);
+        }
+
+
 
         // Compute the final token.
-        Ok(token.update_with_shared_secret::<K>(shared_secret))
-    }
-}
-
-#[derive(Debug)]
-pub enum ClientRegisterError<S>
-where
-    S: DsaSystem,
-{
-    KeyGenError(S::GenError),
-    KProofSignFailure,
-    AProofSignFailure,
-}
-
-#[derive(Debug)]
-pub enum ClientTokenError<K, S>
-where
-    K: KEMAlgorithm,
-    S: SigningAlgorithm,
-{
-    KemSetupError(K::Error),
-    SigningError(S::Error),
-}
-
-#[derive(Debug)]
-pub enum ServerVerificationError<K>
-where
-    K: KEMAlgorithm,
-{
-    ServerSignatureFailure,
-    DecapsulationError(K::Error),
-}
-
-pub struct ServerToken<const H: usize, K, S>
-where
-    K: KEMAlgorithm,
-    S: Signature
-{
-    pub body: ServerTokenBody<H, K>,
-    pub signature: S,
-}
-
-
-pub struct ServerTokenBody<const H: usize, K>
-where 
-    K: KEMAlgorithm
-{
-    code: OpCode,
-    hash: [u8; H],
-    cipher_text: K::CipherText
-}
-
-impl<const H: usize, K> ServerTokenBody<H, K>
-where 
-    K: KEMAlgorithm
-{
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(const { 1 + H });
-        buffer.push(self.code.to_code());
-        buffer.extend_from_slice(&self.hash);
-        buffer.extend_from_slice(&self.cipher_text.to_bytes());
-        buffer
-    }
-}
-
-#[derive(Debug)]
-pub enum ServerTokenError<K, S>
-where
-    K: KEMAlgorithm,
-    S: SigningAlgorithm,
-{
-    FailedToVerifyClientKey,
-    EncapError(K::Error),
-    ServerSignError(S::Error),
-}
-
-
-pub struct ClientToken<S, K>
-where
-    S: Signature,
-    K: KEMAlgorithm,
-{
-    pub body: ClientTokenBody<K>,
-    pub signature: S,
-}
-
-pub struct ClientTokenBody<K: KEMAlgorithm> {
-    pub code: OpCode,
-    pub token: Token<Pending>,
-    pub ek: K::EncapsulationKey
-}
-
-impl<K> ClientTokenBody<K>
-where 
-    K: KEMAlgorithm
-{
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(75);
-        buffer.push(self.code.to_code());
-        buffer.extend_from_slice(&self.token.to_bytes());
-        buffer.extend_from_slice(&self.ek.to_bytes());
-        buffer
-    }
-}
-
-
-
-#[derive(Debug)]
-pub struct ClientRegisterPost<I, PK> {
-    pub code: OpCode,
-    pub identifier: I,
-    pub public_key: PK,
-    pub admin_approval_id: I,
-}
-
-impl<I, PK> ClientRegisterPost<I, PK>
-where
-    I: Identifier,
-    PK: PublicKey,
-{
-    fn bytes(&self) -> Vec<u8> {
-        let mut buffer = vec![];
-        buffer.push(self.code.to_code());
-        buffer.extend_from_slice(&self.identifier.to_bytes());
-        buffer.extend_from_slice(self.public_key.view());
-        buffer.extend_from_slice(&self.admin_approval_id.to_bytes());
-
-        buffer
-    }
-}
-
-
-#[derive(Debug)]
-pub struct ClientRegisterInit<S, A, I>
-where
-    I: Identifier,
-    S: DsaSystem,
-    A: DsaSystem,
-{
-    pub body: ClientRegisterPost<I, S::Public>,
-    pub k_proof: S::Signature,
-    pub a_proof: A::Signature,
-}
-
-pub struct ServerRegister<S, const HASH_SIZE: usize>
-where
-    S: Signature,
-{
-    pub body: ServerRegisterBody<HASH_SIZE>,
-    pub signature: S,
-}
-
-#[derive(Debug)]
-pub struct ServerRegisterBody<const H: usize> {
-    pub code: OpCode,
-    pub identity_hash: [u8; H],
-}
-
-impl<const H: usize> ServerRegisterBody<H> {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = vec![ 0u8;  1 + H  ];
-        buffer.push(self.code.to_code());
-        buffer[1..const { 1 + H }].copy_from_slice(&self.identity_hash);
-
-        buffer
-    }
-}
-
-
-pub struct CycleInit<I, PK, S>
-{
-    pub body: CycleInitBody<I, PK>,
-    pub signature: S
-}
-
-pub struct CycleInitBody<I, PK> {
-    code: OpCode,
-    identifier: I,
-    new_public_key: PK
-}
-
-#[derive(PartialEq, Eq, Debug)]
-#[repr(transparent)]
-pub struct SigWrapper<S: Signature>(pub S);
-
-impl<S> Deref for SigWrapper<S>
-where 
-    S: Signature
-{
-    type Target = S;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-
-}
-
-impl<I, PK> CycleInitBody<I, PK>
-where   
-    I: Identifier,
-    PK: PublicKey
-{
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = vec![];
-        buffer.push(self.code.to_code());
-        buffer.extend_from_slice(&self.identifier.to_bytes());
-        buffer.extend_from_slice(self.new_public_key.view());
-        buffer
+        Ok(new_token)
     }
 }
 
 
 
 
-#[derive(Debug)]
+
+
+
+#[derive(thiserror::Error, Debug)]
 pub enum ServerProtocolError {
+    #[error("Failed to verify the signature attached to the token.")]
     FailedToVerifyTokenSignature,
+    #[error("Failed to encapsulation the key.")]
     EncapsulationFailed,
+    #[error("Failed to sign a response.")]
     FailedToSignResponse,
-    FailedToVerifyCycleReq,
+    #[error("Failed to verify that the client cycling actually owns the new key.")]
+    FailedToVerifyNewCycleKey,
+    #[error("Failed to verify that the client cycling owns the old cycling key.")]
+    FailedToVerifyOldKeyDuringCycle,
+    #[error("Failed to verify that the k-proof during registration was generated correctly.")]
     FailedToVerifyKProof,
-    FailedToVeifyAProof
+    #[error("Failed to verify that the a-proof during registration was generated by an admin.")]
+    FailedToVerifyAProof
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum ClientProtocolError {
+    #[error("Failed to generate the digital signing key pair for cycling/registration")]
     FailedToGenerateDsaPair,
+    #[error("Failed to generate the decap key/encap key pair.")]
     FailedToGenerateKemPair,
+    #[error("Failed to verify the server signature on the cycle request response.")]
     InauthenticCycleResponse,
+    #[error("Failed to verify the server signature on the token request response.")]
     InauthenticTokenResponse,
+    #[error("Failed to decapsulate the ciphertext.")]
     DecapsulationError,
-    FailedToSignRequest
+    #[error("Failed to sign a message with the client private key.")]
+    FailedToSignRequest,
+    #[error("Failed to generate the k-proof on the original registration request.")]
+    KProofSignError,
+    #[error("Failed to generate the a-proof on the original registration request.")]
+    AProofSignError,
+    #[error("Failed to verify the identity hash which is part of the registration process.")]
+    FailedToVerifyIdentityHash,
+    #[error("Failed to verify the server signature on the register response.")]
+    InauthenticRegisterResponse,
+    #[error("Failed to verify the hash returned by the server on the cycle response.")]
+    FailedToVerifyCycleHash,
+    #[error("Failed to verify the approval hash, as in, the exact hash was not reconstructed on the client end.")]
+    FailedToReconstructApprovalHash
 }
 
-pub struct ServerCycle<const H: usize, S>
-where
-    S: Signature,
-{
-    pub body: ServerCycleBody<H>,
-    pub signature: S,
-}
-
-pub struct ServerCycleBody<const H: usize> {
-    pub code: OpCode,
-    pub hash: [u8; H]
-}
-
-impl<const H: usize> ServerCycleBody<H> {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(const { 1 + H });
-        buffer.push(self.code.to_code());
-        buffer.extend_from_slice(self.hash.as_ref());
-        buffer
-    }
-}

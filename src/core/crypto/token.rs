@@ -1,10 +1,11 @@
-use std::{marker::PhantomData, ops::Range};
+use std::{borrow::Cow, marker::PhantomData, ops::Range};
 
 use bitvec::{array::BitArray, order::Lsb0};
 use fips204::Ph;
 use rand::Rng;
+use uuid::Uuid;
 
-use super::{FixedByteRepr, KEMAlgorithm, ToBytes};
+use super::{FixedByteRepr, KEMAlgorithm, Parse, ViewBytes};
 
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,7 +18,7 @@ pub struct Final;
 pub struct Token<K> {
     pub protocol: u8,
     pub sub_protocol: u8,
-    pub id: u128,
+    pub id: Uuid,
     // The permission bitfield.
     pub permissions: BitArray<[u8; 16], Lsb0>,
     pub timestamp: MsSinceEpoch,
@@ -39,11 +40,11 @@ impl<K> Token<K> {
     pub fn permissions(&self) -> &BitArray<[u8; 16], Lsb0> {
         &self.permissions
     }
-    pub fn to_bytes(&self) -> [u8; 74] {
+    pub fn to_fixed_bytes(&self) -> [u8; 74] {
         let mut buffer = [0u8; 74];
         buffer[0] = self.protocol;
         buffer[1] = self.sub_protocol;
-        buffer[ID_FIELD].copy_from_slice(&self.id.to_le_bytes());
+        buffer[ID_FIELD].copy_from_slice(&self.id.to_bytes_le());
         buffer[PERMISSION_FIELD].copy_from_slice(&self.permissions.data);
         buffer[TIMESTAMP_FIELD].copy_from_slice(&self.timestamp.0.to_le_bytes());
         buffer[BODY_FIELD].copy_from_slice(&self.body);
@@ -52,11 +53,18 @@ impl<K> Token<K> {
 
 }
 
-impl<K> From<&[u8]> for Token<K> {
-    fn from(value: &[u8]) -> Self {
+impl<K> ViewBytes for Token<K> {
+    fn view<'a>(&'a self) -> std::borrow::Cow<'a, [u8]> {
+        Cow::Owned(self.to_fixed_bytes().to_vec())
+    }
+}
+
+impl<'a, K> Parse<'a> for Token<K> {
+    type Error = &'static str;
+    fn parse_bytes(value: &'a [u8]) -> Result<Self, Self::Error> {
         let protocol = value[0];
         let sub_protocol = value[1];
-        let id = u128::from_le_bytes(value[ID_FIELD].try_into().unwrap());
+        let id = Uuid::from_bytes_le(value[ID_FIELD].try_into().unwrap());
 
         let perms: [u8; 16] = value[PERMISSION_FIELD].try_into().unwrap();
 
@@ -64,7 +72,7 @@ impl<K> From<&[u8]> for Token<K> {
         let timestamp = MsSinceEpoch(i64::from_le_bytes(value[TIMESTAMP_FIELD].try_into().unwrap()));
         let body = value[BODY_FIELD].try_into().unwrap();
 
-        Self {
+        Ok(Self {
             protocol,
             sub_protocol,
             id,
@@ -72,14 +80,15 @@ impl<K> From<&[u8]> for Token<K> {
             timestamp,
             body,
             _state: PhantomData
-        }
-
+        })
     }
+
 }
+
 
 impl Token<Pending> {
 
-    pub fn new(protocol: u8, sub_protocol: u8, id: u128, time: MsSinceEpoch) -> Self {
+    pub fn new(protocol: u8, sub_protocol: u8, id: Uuid, time: MsSinceEpoch) -> Self {
         Self {
             protocol,
             sub_protocol,
@@ -122,11 +131,7 @@ impl Token<Pending> {
 
 
 
-impl<K> ToBytes for Token<K> {
-    fn to_bytes(&self) -> Vec<u8> {
-        vec![]
-    }
-}
+
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Eq, Ord)]
 pub struct MsSinceEpoch(pub i64);
@@ -140,13 +145,15 @@ mod tests {
     use bitvec::{array::BitArray, vec::BitVec};
     use uuid::Uuid;
 
+    use crate::core::crypto::{Parse, ViewBytes};
+
     use super::{MsSinceEpoch, Pending, Token};
 
 
     impl<'a> Arbitrary<'a> for Token<Pending> {
         fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
             Ok(Self {
-                id: u.arbitrary()?,
+                id: Uuid::from_u128(u.arbitrary()?),
                 permissions: BitArray::from(<[u8; 16]>::arbitrary(u)?),
                 body: <[u8; 32]>::arbitrary(u)?,
                 timestamp: super::MsSinceEpoch(i64::arbitrary(u)?),
@@ -159,12 +166,12 @@ mod tests {
 
     #[test]
     pub fn token_modify_permission_bitfield() {
-        let mut token = Token::new(1, 1, Uuid::new_v4().as_u128(), MsSinceEpoch(3939));
+        let mut token = Token::new(1, 1, Uuid::new_v4(), MsSinceEpoch(3939));
 
         token.permissions_mut().set(0, true);
         assert!(token.permissions().get(0).unwrap());
 
-        let token: Token<Pending> = Token::from(&token.to_bytes() as &[u8]);
+        let token: Token<Pending> = Token::parse_bytes(&*token.view()).unwrap();
         assert!(token.permissions().get(0).unwrap());
 
     }
@@ -176,8 +183,8 @@ mod tests {
             
             let manufactured = Token::arbitrary(u)?;
 
-            let field = manufactured.to_bytes();
-            let manufactured_again = Token::from(&field as &[u8]);
+            let field = manufactured.view();
+            let manufactured_again = Token::parse_bytes(&field as &[u8]).unwrap();
             assert_eq!(manufactured, manufactured_again);
         
             

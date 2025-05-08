@@ -2,6 +2,7 @@ use fips205::traits::{KeyGen, SerDes, Signer, Verifier};
 
 use fips205::*;
 
+use crate::algos::parse_into_fixed_length;
 
 
 
@@ -82,6 +83,21 @@ macro_rules! new_fips205_individual_impl {
             }
         }
 
+        impl crate::core::crypto::ViewBytes for $pk_name {
+            fn view(&self) -> std::borrow::Cow<'_, [u8]> {
+                std::borrow::Cow::Borrowed(&self.0)
+            }
+        }
+
+        impl<'a> crate::core::crypto::Parse<'a> for $pk_name {
+            type Error = &'static str;
+            fn parse_bytes(value: &'a [u8]) -> Result<Self, Self::Error> {
+                let array = parse_into_fixed_length(value)?;
+                let key = $mod_name::PublicKey::try_from_bytes(&array)?;
+                Ok($pk_name(key.into_bytes()))
+            }
+        }
+
         impl crate::core::crypto::PublicKey for $pk_name {
             type Signature =  [u8; { fips205::$mod_name::SIG_LEN }];
         
@@ -89,9 +105,6 @@ macro_rules! new_fips205_individual_impl {
         
             fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool {
                 $mod_name::PublicKey::try_from_bytes(&self.0).unwrap().verify(message, signature, &[])
-            }
-            fn view(&self) -> &[u8] {
-                &self.0
             }
         }
 
@@ -115,21 +128,6 @@ macro_rules! new_fips205_individual_impl {
     }
 }
 
-macro_rules! new_sig_spec {
-    ( $($size:expr),* ) => {
-        $(
-            impl crate::core::crypto::Signature for [u8; $size] {
-                fn view(&self) -> &[u8] {
-                    self
-                }
-                fn from_byte(buf: &[u8]) -> Self {
-                    buf.clone().try_into().unwrap()
-                }
-            }
-        )*
-        
-    }
-}
 
 macro_rules! new_fips205_spec {
     (
@@ -151,7 +149,6 @@ macro_rules! new_fips205_spec {
 }
 
 
-new_sig_spec!(7856, 17088, 35664, 16224, 49856, 29792);
 
 new_fips205_spec! {
     Sha2_128,
