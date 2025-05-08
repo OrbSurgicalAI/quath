@@ -4,6 +4,7 @@ pub mod protocol;
 pub mod token;
 pub mod specials;
 pub mod mem;
+pub mod opcode;
 
 pub trait Identifier: Copy {
     fn gen_id() -> Self;
@@ -15,8 +16,10 @@ pub trait Identifier: Copy {
 
 pub trait Signature {
     fn view(&self) -> &[u8];
-        
+    fn from_byte(seq: &[u8]) -> Self;
 }
+
+
 
 
 /// The [PrivateKey] trait specifies how a [PrivateKey] compatible with this protocol

@@ -102,10 +102,39 @@ macro_rules! new_fips204_spec {
             fn view(&self) -> &[u8] {
                 self
             }
+            fn from_byte(buf: &[u8]) -> Self {
+                buf.clone().try_into().unwrap()
+            }
         }
+
+        paste::paste! {
+            #[cfg(test)]
+            #[allow(non_snake_case)]
+            mod [<tests_$primary>] {
+                #[test]
+                #[allow(non_snake_case)]
+                pub fn [<test_ $primary>]() {
+                    crate::testutil::test_signing_harness::<crate::algos::fips204::$primary>(&[1,2,3]);
+                }
+
+                #[test]
+                #[allow(non_snake_case)]
+                pub fn [<arbtest_simple_ $primary>]() {
+                    crate::testutil::run_arbtest_harness_simple::<crate::algos::fips204::$primary>();
+                }
+            }
+
+            
+            
+        }
+
+       
 
     };
 }
+
+
+
 
 
 
@@ -127,6 +156,8 @@ new_fips204_spec! {
     MlDsa87Public,
     ml_dsa_87
 }
+
+
 
 
 

@@ -95,6 +95,23 @@ macro_rules! new_fips205_individual_impl {
             }
         }
 
+        // paste::paste! {
+        //     #[cfg(test)]
+        //     #[allow(non_snake_case)]
+        //     mod [<tests_$primary>] {
+        //         #[test]
+        //         #[allow(non_snake_case)]
+        //         pub fn [<test_ $primary>]() {
+        //             crate::testutil::test_signing_harness::<crate::algos::fips205::$primary>(&[1,2,3]);
+        //         }
+
+                
+        //     }
+
+            
+            
+        // }
+
     }
 }
 
@@ -104,6 +121,9 @@ macro_rules! new_sig_spec {
             impl crate::core::crypto::Signature for [u8; $size] {
                 fn view(&self) -> &[u8] {
                     self
+                }
+                fn from_byte(buf: &[u8]) -> Self {
+                    buf.clone().try_into().unwrap()
                 }
             }
         )*

@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Deref};
 
 use bitvec::array::BitArray;
 use rand::Rng;
@@ -8,31 +8,10 @@ use uuid::Uuid;
 
 
 use super::{
-    token::{Final, MsSinceEpoch, Pending, Token}, DsaSystem, FixedByteRepr, HashingAlgorithm, Identifier, KEMAlgorithm, PrivateKey, PublicKey, Signable, Signature, SigningAlgorithm, ToBytes
+    opcode::OpCode, token::{Final, MsSinceEpoch, Pending, Token}, DsaSystem, FixedByteRepr, HashingAlgorithm, Identifier, KEMAlgorithm, PrivateKey, PublicKey, Signable, Signature, SigningAlgorithm, ToBytes
 };
 
-#[derive(Debug)]
-pub enum OpCode {
-    Register,
-    RegSuccess,
-    Cycle,
-    CycleOk,
-    Stamp,
-    Stamped,
-}
 
-impl OpCode {
-    fn to_code(&self) -> u8 {
-        match self {
-            Self::Register => 0,
-            Self::RegSuccess => 1,
-            Self::Cycle => 2,
-            Self::CycleOk => 3,
-            Self::Stamp => 4,
-            Self::Stamped => 5,
-        }
-    }
-}
 
 
 pub type UniformSignedProtocol<S, K, H, I, const H_SIZE: usize> = ProtocolKit<S, K, H, I, S, H_SIZE>;
@@ -467,6 +446,21 @@ pub struct CycleInitBody<I, PK> {
     code: OpCode,
     identifier: I,
     new_public_key: PK
+}
+
+#[derive(PartialEq, Eq, Debug)]
+#[repr(transparent)]
+pub struct SigWrapper<S: Signature>(pub S);
+
+impl<S> Deref for SigWrapper<S>
+where 
+    S: Signature
+{
+    type Target = S;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+
 }
 
 impl<I, PK> CycleInitBody<I, PK>

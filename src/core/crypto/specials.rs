@@ -1,7 +1,16 @@
-use super::{SigningAlgorithm, ToBytes};
+use super::{Signature, SigningAlgorithm, ToBytes};
 
 
 pub struct PermissiveSign;
+
+impl Signature for [u8; 0] {
+    fn from_byte(seq: &[u8]) -> Self {
+        []
+    }
+    fn view(&self) -> &[u8] {
+        &[]
+    }
+}
 
 impl ToBytes for () {
     fn to_bytes(&self) -> Vec<u8> {
