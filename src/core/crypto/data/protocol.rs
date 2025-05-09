@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::core::crypto::{mem::B64, opcode::OpCode, token::{Pending, Token}, KEMAlgorithm, PublicKey, Signature, ViewBytes};
+use crate::core::crypto::{mem::B64, opcode::OpCode, token::{Pending, Token}, KEMAlgorithm, MsSinceEpoch, PublicKey, Signature, ViewBytes};
 
 
 #[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
@@ -20,7 +20,8 @@ where
 {
     pub code: OpCode,
     pub hash: B64<[u8; H]>,
-    pub cipher_text: B64<K::CipherText>
+    pub cipher_text: B64<K::CipherText>,
+    pub expiry: MsSinceEpoch
 }
 
 impl<const H: usize, K> ServerTokenBody<H, K>
@@ -36,7 +37,6 @@ where
     }
 }
 
-
 #[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClientToken<S, K>
 where
@@ -46,6 +46,7 @@ where
     pub body: ClientTokenBody<K>,
     pub signature: B64<S>,
 }
+
 
 #[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClientTokenBody<K: KEMAlgorithm> {

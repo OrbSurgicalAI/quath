@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Duration};
 
 use bitvec::array::BitArray;
 use rand::Rng;
@@ -27,21 +27,20 @@ pub type ClientRegisterResult<PUB, SIG, PRIV> = ClientProtocolResult<(ClientRegi
 
 
 
-pub struct ProtocolKit<S, K, H, const HASH_SIZE: usize> {
+pub struct ProtocolKit<S, K, H, const HS: usize> {
     _s: PhantomData<S>,
     _k: PhantomData<K>,
     _h: PhantomData<H>,
-    _hashsize: PhantomData<[u8; HASH_SIZE]>,
+    _hashsize: PhantomData<[u8; HS]>,
 }
 
-impl<S, K, H, const HASH_SIZE: usize> ProtocolKit<S, K, H, HASH_SIZE>
+impl<S, K, H, const HS: usize> ProtocolKit<S, K, H, HS>
 where
     S: DsaSystem,
     K: KEMAlgorithm,
-    H: HashingAlgorithm<HASH_SIZE>,
+    H: HashingAlgorithm<HS>,
 {
-    /// Initiates client registration. We start by proposing a new [Uuid], which the server
-    /// will only approve if it is unique. We then provide two proofs:
+    /// Initiates client registration. We start by proposing a new [Uuid], which the server will only approve if it is unique. We then provide two proofs:
     /// 
     /// 1. The first proof states that we do actually own the key. Although this is not strictly a necessary security condition, it prevents clients from registering null entities.
     /// 
@@ -103,7 +102,7 @@ where
         client: &ClientRegisterInit<S::Public, S::Signature>,
         admin_public_key: &S::Public,
         server_key: &S::Private,
-    ) -> ServerProtocolResult<ServerRegister<S::Signature, HASH_SIZE>> {
+    ) -> ServerProtocolResult<ServerRegister<S::Signature, HS>> {
         if !client
             .body
             .public_key
@@ -138,7 +137,7 @@ where
     }
     /// This method is the termination of the client 
     pub fn client_register_finish(
-        in_resp: &ServerRegister<S::Signature, HASH_SIZE>,
+        in_resp: &ServerRegister<S::Signature, HS>,
         client_id: Uuid,
         server_public: &S::Public,
     ) -> ClientProtocolResult<()> {
@@ -213,7 +212,7 @@ where
         in_msg: &CycleInit<S::Public, S::Signature>,
         client_public: &S::Public,
         server_private: &S::Private,
-    ) -> ServerProtocolResult<ServerCycle<HASH_SIZE, S::Signature>> {
+    ) -> ServerProtocolResult<ServerCycle<HS, S::Signature>> {
 
         // We need to check that the client actually owns the new
         // key being proposed.
@@ -248,7 +247,7 @@ where
     /// 1. Verify that the hash provided by the server corresponds to the actual request that was made.
     /// 2. 
     pub fn client_cycle_finish(
-        in_msg: &ServerCycle<HASH_SIZE, S::Signature>,
+        in_msg: &ServerCycle<HS, S::Signature>,
         client_id: Uuid,
         proposed_public_key: &S::Public,
         server_public: &S::Public,
@@ -284,7 +283,6 @@ where
         current_time: MsSinceEpoch,
         client_pk: &S::Private,
         client_id: Uuid,
-        context: &K::Context,
         mut modifier: F
     ) -> ClientTokenResult<S::Signature, K, K::DecapsulationKey>
     where   
@@ -304,7 +302,7 @@ where
         modifier(&mut token);
 
         // Generate the decapsulation & encapsulation keypair.
-        let (dk, ek) = K::generate(context)
+        let (dk, ek) = K::generate()
             .map_err(|_| ClientProtocolError::FailedToGenerateKemPair)?;
 
         // Build the request body.
@@ -332,11 +330,11 @@ where
     pub fn server_token(
         ClientToken { body, signature }: &ClientToken<S::Signature, K>,
         client_pk: &S::Public,
-        ctx: &K::Context,
         server_key: &S::Private,
         interval: &TokenValidityInterval,
-        current_time: MsSinceEpoch
-    ) -> ServerTokenResult<HASH_SIZE, K, S::Signature> {
+        current_time: MsSinceEpoch,
+        expiry: Duration
+    ) -> ServerTokenResult<HS, K, S::Signature> {
 
         // The token is out of the interval here.
         if !interval.check_time_validity(current_time, body.token.timestamp) {
@@ -352,7 +350,7 @@ where
 
 
         // Perform encapsulation using the KEM.
-        let (cipher_text, shared_secret) = K::encapsulate(&body.ek, ctx)
+        let (cipher_text, shared_secret) = K::encapsulate(&body.ek)
             .map_err(|_| ServerProtocolError::EncapsulationFailed)?;
 
 
@@ -366,7 +364,8 @@ where
         let body = ServerTokenBody {
             code: OpCode::Stamped,
             cipher_text: B64(cipher_text),
-            hash: B64(approval)
+            hash: B64(approval),
+            expiry: MsSinceEpoch(current_time.0 + expiry.as_millis() as i64)
         };
 
         // Sign the response body with the server private key.
@@ -381,12 +380,11 @@ where
     /// veriifcations to verify the correctness and authenticity of the request,
     /// and then will create the final token.
     pub fn client_token_finish(
-        ServerToken { body, signature }: &ServerToken<HASH_SIZE, K, S::Signature>,
+        ServerToken { body, signature }: &ServerToken<HS, K, S::Signature>,
         token: &Token<Pending>,
         decap_key: &K::DecapsulationKey,
         
         server_pk: &S::Public,
-        ctx: &K::Context,
     ) -> ClientProtocolResult<Token<Final>> {
 
 
@@ -397,7 +395,7 @@ where
         }
 
         // Get the shared secret.
-        let shared_secret = K::decapsulate(decap_key, &body.cipher_text, ctx)
+        let shared_secret = K::decapsulate(decap_key, &body.cipher_text)
             .map_err(|_| ClientProtocolError::DecapsulationError)?;
 
         // Calculate the approval hash.
@@ -424,6 +422,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use sha3::Sha3_256;
     use uuid::Uuid;
 
@@ -468,16 +468,16 @@ mod tests {
         QuantumKitL1::client_cycle_finish(&serv, client_id, &*new_public, &server_public).unwrap();
 
         // client proposes toen.
-        let (req, decapskey) = QuantumKitL1::client_token_init(0, 0, MsSinceEpoch(0), &client_private, client_id, &(), |_: &mut Token<Pending>| {
+        let (req, decapskey) = QuantumKitL1::client_token_init(0, 0, MsSinceEpoch(0), &client_private, client_id, |_: &mut Token<Pending>| {
             
         }).unwrap();
 
 
         // Server will responsee.
-        let (res, server_final_token) = QuantumKitL1::server_token(&req, &new_public, &(), &server_private, &TokenValidityInterval::from_seconds(0, 0), MsSinceEpoch(0)).unwrap();
+        let (res, server_final_token) = QuantumKitL1::server_token(&req, &new_public, &server_private, &TokenValidityInterval::from_seconds(0, 0), MsSinceEpoch(0), Duration::from_secs(3)).unwrap();
 
         // Client will see the server response.
-        let client_final_token = QuantumKitL1::client_token_finish(&res, &req.body.token, &decapskey, &server_public, &()).unwrap();
+        let client_final_token = QuantumKitL1::client_token_finish(&res, &req.body.token, &decapskey, &server_public).unwrap();
 
 
 

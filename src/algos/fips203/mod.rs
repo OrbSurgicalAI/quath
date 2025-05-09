@@ -61,21 +61,20 @@ macro_rules! gen_fips203_kem_variant {
             type DecapsulationKey = fips203::$module_name::DecapsKey;
             type CipherText = fips203::$module_name::CipherText;
             type SharedSecret = fips203::SharedSecretKey;
-            type Context = ();
             type Error = &'static str;
         
-            fn generate(_: &Self::Context) -> Result<(Self::DecapsulationKey, Self::EncapsulationKey), Self::Error> {
+            fn generate() -> Result<(Self::DecapsulationKey, Self::EncapsulationKey), Self::Error> {
                 let (encap, decap) = fips203::$module_name::KG::try_keygen()?;
         
                 Ok((decap, encap))
             }
         
-            fn encapsulate(encap_key: &Self::EncapsulationKey, _: &Self::Context) -> Result<(Self::CipherText, Self::SharedSecret), Self::Error> {
+            fn encapsulate(encap_key: &Self::EncapsulationKey) -> Result<(Self::CipherText, Self::SharedSecret), Self::Error> {
                 let (ss, ct) = encap_key.try_encaps()?;
                 Ok((ct, ss))
             }
         
-            fn decapsulate(decap_key: &Self::DecapsulationKey, cipher: &Self::CipherText, _: &Self::Context) -> Result<Self::SharedSecret, Self::Error> {
+            fn decapsulate(decap_key: &Self::DecapsulationKey, cipher: &Self::CipherText) -> Result<Self::SharedSecret, Self::Error> {
                let ss =  decap_key.try_decaps(cipher)?;
                
                Ok(ss)
@@ -116,9 +115,9 @@ mod tests {
     #[test]
     pub fn test_fips203_kem() {
         
-        let (dk, ek) = MlKem512::generate(&()).unwrap();
-        let (ct, server_ss) = MlKem512::encapsulate(&ek, &()).unwrap();
-        let client_ss = MlKem512::decapsulate(&dk, &ct, &()).unwrap();
+        let (dk, ek) = MlKem512::generate().unwrap();
+        let (ct, server_ss) = MlKem512::encapsulate(&ek).unwrap();
+        let client_ss = MlKem512::decapsulate(&dk, &ct).unwrap();
         assert_eq!(server_ss, client_ss);
 
     }

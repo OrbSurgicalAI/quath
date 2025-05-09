@@ -34,14 +34,14 @@ pub trait FixedByteRepr<const N: usize> {
 /// The [PrivateKey] trait specifies how a [PrivateKey] compatible with this protocol
 /// should be implemented. This alows for the protocol to operate over a wide range
 /// of Signing/KEM algorithms.
-pub trait PrivateKey {
+pub trait PrivateKey: Clone {
     type Signature: Signature;
     type Error;
     /// Signs a byte sequence with the private key.
     fn sign_bytes(&self, sequence: &[u8]) -> Result<Self::Signature, Self::Error>;
 }
 
-pub trait PublicKey: ViewBytes + for<'a> Parse<'a>
+pub trait PublicKey: ViewBytes + for<'a> Parse<'a> + Clone
 {
     type Signature;
 
@@ -68,16 +68,15 @@ pub trait HashingAlgorithm<const N: usize> {
 }
 
 pub trait KEMAlgorithm {
-    type Context;
     type DecapsulationKey;
     type EncapsulationKey: ViewBytes + for<'a> Parse<'a>;
     type CipherText: ViewBytes + for<'a> Parse<'a>;
     type SharedSecret: FixedByteRepr<32> + ViewBytes + for<'a> Parse<'a>;
     type Error;
 
-    fn generate(context: &Self::Context) -> Result<(Self::DecapsulationKey, Self::EncapsulationKey), Self::Error>;
-    fn encapsulate(encap_key: &Self::EncapsulationKey, context: &Self::Context) -> Result<(Self::CipherText, Self::SharedSecret), Self::Error>;
-    fn decapsulate(decap_key: &Self::DecapsulationKey, cipher: &Self::CipherText, context: &Self::Context) -> Result<Self::SharedSecret, Self::Error>;
+    fn generate() -> Result<(Self::DecapsulationKey, Self::EncapsulationKey), Self::Error>;
+    fn encapsulate(encap_key: &Self::EncapsulationKey) -> Result<(Self::CipherText, Self::SharedSecret), Self::Error>;
+    fn decapsulate(decap_key: &Self::DecapsulationKey, cipher: &Self::CipherText) -> Result<Self::SharedSecret, Self::Error>;
 }
 
 

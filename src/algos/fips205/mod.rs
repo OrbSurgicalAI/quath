@@ -25,6 +25,7 @@ macro_rules! new_pk_cont_ncc_group {
         /// to more efficiently interact with the underlying bytes
         /// of the public key.
         #[repr(transparent)]
+        #[derive(Clone)]
         pub struct $name(pub [u8; $len]);
 
         impl From<$target_type> for $name {
