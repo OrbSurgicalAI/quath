@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::core::crypto::{
     ClientProtocolError, ClientToken, CycleInit, DsaSystem, HashingAlgorithm, KEMAlgorithm,
-    MsSinceEpoch, PrivateKey, ServerCycle, ServerToken,
+    MsSinceEpoch, ServerCycle, ServerToken,
     protocol::ProtocolKit,
     token::{Final, Pending, Token},
 };
@@ -54,8 +54,6 @@ use crate::core::crypto::{
 ///     let token = driver.poll_token(MsSinceEpoch(0));
 /// 
 /// }
-/// 
-/// 
 /// ```
 pub struct ClientDriver<S, K, H, const HS: usize>
 where
@@ -81,7 +79,6 @@ where
     container: Option<InternalTokenContainer>,
     _k: PhantomData<K>,
     _h: PhantomData<H>,
-    _hs: PhantomData<[u8; HS]>,
 }
 
 enum DriverState<S, K>
@@ -180,7 +177,6 @@ where
                 transformer: transform,
                 output_buffer: ConstGenericRingBuffer::default(),
                 _h: PhantomData,
-                _hs: PhantomData,
                 _k: PhantomData,
             },
             state: DriverState::Init,
@@ -496,7 +492,6 @@ mod tests {
             core::crypto::{
                 DsaSystem, MsSinceEpoch, TokenValidityInterval,
                 protocol::ProtocolKit,
-                token::{Pending, Token},
             },
         };
         use sha3::Sha3_256;
@@ -504,7 +499,6 @@ mod tests {
         use uuid::Uuid;
 
         use super::{ClientDriver, ClientInput, ClientOutput, ProtocolSpec};
-        use std::task::Poll;
 
         let (client_pk, client_sk) = MlDsa44::generate().unwrap();
         let (server_pk, server_sk) = MlDsa44::generate().unwrap();
@@ -524,7 +518,7 @@ mod tests {
             panic!("Expected token request");
         };
 
-        let (response, _server_tok) = ProtocolKit::<MlDsa44, MlKem512, Sha3_256, 32>::server_token(
+        let (_, _server_tok) = ProtocolKit::<MlDsa44, MlKem512, Sha3_256, 32>::server_token(
             &client_request,
             &client_pk,
             &server_sk,
@@ -545,7 +539,7 @@ mod tests {
 
         // Step 4: Client should emit cycle key storage and cycle request
         let store_key = driver.poll_transmit().unwrap();
-        let ClientOutput::StoreNewCycleKey((new_pub, new_priv)) = store_key else {
+        let ClientOutput::StoreNewCycleKey((_, new_priv)) = store_key else {
             panic!("Expected new cycle key storage");
         };
 

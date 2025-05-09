@@ -19,9 +19,7 @@ pub use simple::*;
 pub use time::*;
 
 
-pub trait Signature: ViewBytes + for<'a> Parse<'a> {
-    fn from_byte(seq: &[u8]) -> Self;
-}
+pub trait Signature: ViewBytes + for<'a> Parse<'a> {}
 
 
 pub trait FixedByteRepr<const N: usize> {
@@ -112,9 +110,7 @@ impl<const N: usize> ViewBytes for [u8; N] {
 }
 
 impl<const N: usize> Signature for [u8; N] {
-    fn from_byte(seq: &[u8]) -> Self {
-        seq.try_into().unwrap()
-    }
+   
 }
 
 

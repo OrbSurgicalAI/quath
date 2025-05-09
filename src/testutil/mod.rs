@@ -1,10 +1,43 @@
 use std::{fmt::Debug, time::Duration};
 
 use arbitrary::Arbitrary;
+use uuid::Uuid;
 
-use crate::core::crypto::{DsaSystem, PrivateKey, PublicKey};
-
+use crate::{core::crypto::{DsaSystem, PrivateKey, PublicKey}, KEMAlgorithm};
 pub const ARBTEST_DURATION: Duration = Duration::from_secs(2);
+
+
+pub struct BasicSetupDetails<S>
+where 
+    S: DsaSystem
+{
+    pub client_id: Uuid,
+    pub admin_id: Uuid,
+    pub admin_pk: S::Public,
+    pub admin_sk: S::Private,
+    pub server_pk: S::Public,
+    pub server_sk: S::Private
+}
+
+impl<S: DsaSystem> BasicSetupDetails<S> {
+    pub fn new() -> Self {
+        let client_id = Uuid::new_v4();
+        let admin_id = Uuid::new_v4();
+
+        let (admin_pk, admin_sk) = S::generate().map_err(|_| "failed").unwrap();
+        let (server_pk, server_sk) = S::generate().map_err(|_| "failed").unwrap();
+
+        Self {
+            client_id,
+            admin_id,
+            admin_pk,
+            admin_sk,
+            server_pk,
+            server_sk
+        }
+    }
+}
+
 
 pub fn run_arbtest_harness_simple<S>()
 where 
@@ -45,3 +78,31 @@ where
 
 }
 
+
+
+#[cfg(test)]
+mod tests {
+    use crate::core::crypto::{specials::{FauxChain, FauxKem}, DsaSystem, KEMAlgorithm, PrivateKey, PublicKey};
+
+  
+
+
+    #[test]
+    pub fn test_faux_dsa() {
+        let (f_pk, f_sk) = FauxChain::generate().unwrap();
+        let (f_pk2, _) = FauxChain::generate().unwrap();
+        let sign = f_sk.sign_bytes(&[1, 2, 3]).unwrap();
+        assert!(f_pk.verify(&[1, 2, 3], &sign));
+        assert!(!f_pk.verify(&[1, 2], &sign));
+        assert!(!f_pk2.verify(&[1, 2, 3], &sign));
+
+    }
+
+    #[test]
+    pub fn test_faux_kem() {
+        let (dk, ek) = FauxKem::generate().unwrap();
+        let (ct, ss) = FauxKem::encapsulate(&ek).unwrap();
+        let c_ss = FauxKem::decapsulate(&dk, &ct).unwrap();
+        assert_eq!(c_ss.0, ss.0);
+    }
+}

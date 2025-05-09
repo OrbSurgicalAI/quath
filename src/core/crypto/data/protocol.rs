@@ -135,7 +135,7 @@ impl<const H: usize> ServerRegisterBody<H> {
     }
 }
 
-
+#[derive(Clone)]
 #[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CycleInit<PK, S>
 where 
@@ -147,6 +147,7 @@ where
     pub original_proof: B64<S>
 }
 
+#[derive(Clone)]
 #[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CycleInitBody<PK>
 where 
