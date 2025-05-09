@@ -10,7 +10,9 @@ use crate::core::crypto::{
     token::{Final, Pending, Token},
 };
 
-/// Represents the protocol execution from the client end.
+/// Represents the protocol execution from the client end in a SANS/IO manner.
+/// 
+/// 
 ///
 /// It is driven with three methods:
 ///
@@ -21,7 +23,40 @@ use crate::core::crypto::{
 ///
 /// NOTE: If you are looking for a simple way to interact with the protocol, chances are
 /// this is not what you are looking for. This is the raw protocol driver, and is a stateful
-/// wrapper built on [ProtocolKit].
+/// wrapper built on [ProtocolKit]. For information on how the protocol works, it is best to refer
+/// to the [ProtocolKit] documentation.
+/// 
+/// # Example
+/// ```
+/// use quath::ClientDriver;
+/// use quath::algos::fips204::MlDsa44;
+/// use quath::algos::fips203::MlKem512;
+/// use sha3::Sha3_256;
+/// use quath::core::crypto::DsaSystem;
+/// use uuid::Uuid;
+/// use quath::ProtocolSpec;
+/// use quath::core::crypto::MsSinceEpoch;
+/// 
+/// 
+/// let (client_pk, client_sk) = MlDsa44::generate().unwrap();
+/// let (server_pk, server_sk) = MlDsa44::generate().unwrap();
+/// let mut driver = ClientDriver::<MlDsa44, MlKem512, Sha3_256, 32>::new(Uuid::new_v4(), client_sk, ProtocolSpec::new(0, 0), server_pk);
+/// 
+/// // In a real example this would be driven differently.
+/// for i in 0..5 {
+///     /* Here you would pass in the inptus */
+///     driver.recv(MsSinceEpoch(0), None).unwrap();
+/// 
+///     while let Some(transmit) = driver.poll_transmit() {
+///         /* send out the packet */    
+///     }
+/// 
+///     let token = driver.poll_token(MsSinceEpoch(0));
+/// 
+/// }
+/// 
+/// 
+/// ```
 pub struct ClientDriver<S, K, H, const HS: usize>
 where
     S: DsaSystem,
@@ -154,43 +189,16 @@ where
     /// This accepts messages from the outside and will drive forward
     /// the state machine.
     ///
-    /// The client will immediately try to acquire a token.
+    /// The client will immediately try to acquire a token. If there is an
+    /// error then the state machine will immediately be brought back to the
+    /// [DriverState::Init] mode, and the error will be propagated up to the caller.
     pub fn recv(
         &mut self,
         time: MsSinceEpoch,
         packet: Option<ClientInput<S, K, HS>>,
     ) -> Result<(), ClientProtocolError> {
-        if let Some(ClientInput::ServerPublicChange(inner)) = packet {
-            self.inner.server_public = inner;
-            return Ok(());
-        }
-
-        let state = match &self.state {
-            DriverState::Init => handle_client_init_state(&mut self.inner, time, &packet)?,
-            DriverState::AcquiringToken { token, dk } => {
-                handle_acquiring_token_state(&mut self.inner, &packet, token, dk)?
-            }
-            // The ready state does not make any effort to parse the packet,
-            // we are simply zen.
-            DriverState::Ready => None,
-            DriverState::InitCycle => handle_client_cycle_init(&mut self.inner)?,
-            DriverState::WaitingOnCycle {
-                pending_private,
-                pending_public,
-            } => handle_client_cycle_pending(
-                &mut self.inner,
-                &packet,
-                &pending_private,
-                &pending_public,
-            )?,
-        };
-
-        if let Some(inner) = state {
-            // If we output a new state, install said state.
-            self.state = inner;
-        }
-
-        Ok(())
+        recv_internal(self, time, packet)
+            .inspect_err(|_| self.state = DriverState::Init)
     }
     /// This should be polled until it is empty.
     pub fn poll_transmit(&mut self) -> Option<ClientOutput<S, K>> {
@@ -216,6 +224,46 @@ where
 
         Poll::Ready(token)
     }
+}
+
+fn recv_internal<S, K, H, const HS: usize>(obj: &mut ClientDriver<S, K, H, HS>, time: MsSinceEpoch, packet: Option<ClientInput<S, K, HS>>) -> Result<(), ClientProtocolError>
+where 
+    S: DsaSystem,
+    K: KEMAlgorithm,
+    H: HashingAlgorithm<HS>,
+
+{
+    if let Some(ClientInput::ServerPublicChange(inner)) = packet {
+        obj.inner.server_public = inner;
+        return Ok(());
+    }
+
+    let state = match &obj.state {
+        DriverState::Init => handle_client_init_state(&mut obj.inner, time, &packet)?,
+        DriverState::AcquiringToken { token, dk } => {
+            handle_acquiring_token_state(&mut obj.inner, &packet, token, dk)?
+        }
+        // The ready state does not make any effort to parse the packet,
+        // we are simply zen.
+        DriverState::Ready => None,
+        DriverState::InitCycle => handle_client_cycle_init(&mut obj.inner)?,
+        DriverState::WaitingOnCycle {
+            pending_private,
+            pending_public,
+        } => handle_client_cycle_pending(
+            &mut obj.inner,
+            &packet,
+            &pending_private,
+            &pending_public,
+        )?,
+    };
+
+    if let Some(inner) = state {
+        // If we output a new state, install said state.
+        obj.state = inner;
+    }
+
+    Ok(())
 }
 
 fn handle_client_init_state<S, K, H, const HS: usize>(
@@ -734,4 +782,59 @@ mod tests {
             Poll::Pending => panic!("Expected token to be ready"),
         }
     }
+
+    type Driver = ClientDriver<MlDsa44, MlKem512, Sha3_256, 32>;
+
+
+
+
+   
+
+
+
+    #[test]
+    fn test_custom_token_transformer_modifies_token() {
+
+        fn permission_encoder(tok: &mut Token<Pending>) {
+            tok.permissions_mut().as_mut_bitslice().set(1, true);
+        }
+  
+
+        let (client_pk, client_sk) = MlDsa44::generate().unwrap();
+        let (server_pk, server_sk) = MlDsa44::generate().unwrap();
+
+        let mut driver = Driver::new_with_token_transform(
+            Uuid::new_v4(),
+            client_sk.clone(),
+            ProtocolSpec::new(1, 0),
+            server_pk.clone(),
+            permission_encoder,
+        );
+
+        driver.recv(MsSinceEpoch(0), None).unwrap();
+        let ClientOutput::TokenRequest(req) = driver.poll_transmit().unwrap() else {
+            panic!("Expected TokenRequest");
+        };
+
+        let (response, expected_token) = ProtocolKit::<MlDsa44, MlKem512, Sha3_256, 32>::server_token(
+            &req,
+            &client_pk,
+            &server_sk,
+            &TokenValidityInterval::new(Duration::from_secs(30), Duration::from_secs(30)),
+            MsSinceEpoch(0),
+            Duration::from_secs(3),
+        ).unwrap();
+
+       
+
+        driver.recv(MsSinceEpoch(0), Some(ClientInput::TokenResponseSuccess(response))).unwrap();
+
+        match driver.poll_token(MsSinceEpoch(100)) {
+            Poll::Ready(token) => {
+                assert!(token.permissions().as_bitslice().get(1).unwrap());
+            },
+            Poll::Pending => panic!("Expected transformed token to be ready"),
+        }
+    }
+
 }
