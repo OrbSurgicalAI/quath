@@ -8,29 +8,27 @@ use uuid::Uuid;
 
 
 use super::{
-    mem::B64, opcode::OpCode, token::{Final, MsSinceEpoch, Pending, Token}, ClientRegisterInit, DsaSystem, FixedByteRepr, HashingAlgorithm, KEMAlgorithm, PrivateKey, PublicKey, Signature, ViewBytes
+    mem::B64, opcode::OpCode, token::{Final, MsSinceEpoch, Pending, Token}, ClientProtocolError, ClientRegisterInit, DsaSystem, FixedByteRepr, HashingAlgorithm, KEMAlgorithm, PrivateKey, PublicKey, ServerProtocolError, Signature, ViewBytes
 };
 
 
 use super::data::*;
 
 
-pub type UniformSignedProtocol<S, K, H, const H_SIZE: usize> = ProtocolKit<S, K, H, S, H_SIZE>;
+pub type UniformSignedProtocol<S, K, H, const H_SIZE: usize> = ProtocolKit<S, K, H, H_SIZE>;
 
-pub struct ProtocolKit<S, K, H, A, const HASH_SIZE: usize> {
+pub struct ProtocolKit<S, K, H, const HASH_SIZE: usize> {
     _s: PhantomData<S>,
     _k: PhantomData<K>,
     _h: PhantomData<H>,
-    _a: PhantomData<A>,
     _hashsize: PhantomData<[u8; HASH_SIZE]>,
 }
 
-impl<S, K, H, A, const HASH_SIZE: usize> ProtocolKit<S, K, H, A, HASH_SIZE>
+impl<S, K, H, const HASH_SIZE: usize> ProtocolKit<S, K, H, HASH_SIZE>
 where
     S: DsaSystem,
     K: KEMAlgorithm,
     H: HashingAlgorithm<HASH_SIZE>,
-    A: DsaSystem,
 {
     /// Initiates client registration. We start by proposing a new [Uuid], which the server
     /// will only approve if it is unique. We then provide two proofs:
@@ -45,9 +43,9 @@ where
     pub fn client_register_init(
         client_id: Uuid,
         admin_id: Uuid,
-        admin_priv: &A::Private,
-    ) -> Result<(ClientRegisterInit<S::Public, S::Signature, A::Signature>, S::Private), ClientProtocolError> {
-        let (public, private) = S::generate().map_err(|e| ClientProtocolError::FailedToGenerateDsaPair)?;
+        admin_priv: &S::Private,
+    ) -> Result<(ClientRegisterInit<S::Public, S::Signature>, S::Private), ClientProtocolError> {
+        let (public, private) = S::generate().map_err(|_| ClientProtocolError::FailedToGenerateDsaPair)?;
 
 
         
@@ -97,8 +95,8 @@ where
     /// The client ID is unique.
     /// The client PK is unique.
     pub fn server_register(
-        client: &ClientRegisterInit<S::Public, S::Signature, A::Signature>,
-        admin_public_key: &A::Public,
+        client: &ClientRegisterInit<S::Public, S::Signature>,
+        admin_public_key: &S::Public,
         server_key: &S::Private,
     ) -> Result<ServerRegister<S::Signature, HASH_SIZE>, ServerProtocolError> {
         if !client
@@ -135,7 +133,7 @@ where
     }
     /// This method is the termination of the client 
     pub fn client_register_finish(
-        in_resp: ServerRegister<S::Signature, HASH_SIZE>,
+        in_resp: &ServerRegister<S::Signature, HASH_SIZE>,
         client_id: Uuid,
         server_public: &S::Public,
     ) -> Result<(), ClientProtocolError> {
@@ -205,7 +203,7 @@ where
     /// # Preconditions
     /// The new key must be unique.
     pub fn server_cycle(
-        in_msg: CycleInit<S::Public, S::Signature>,
+        in_msg: &CycleInit<S::Public, S::Signature>,
         client_public: &S::Public,
         server_private: &S::Private,
     ) -> Result<ServerCycle<HASH_SIZE, S::Signature>, ServerProtocolError> {
@@ -243,7 +241,7 @@ where
     /// 1. Verify that the hash provided by the server corresponds to the actual request that was made.
     /// 2. 
     pub fn client_cycle_finish(
-        in_msg: ServerCycle<HASH_SIZE, S::Signature>,
+        in_msg: &ServerCycle<HASH_SIZE, S::Signature>,
         client_id: Uuid,
         proposed_public_key: &S::Public,
         server_public: &S::Public,
@@ -280,12 +278,13 @@ where
         client_pk: &S::Private,
         client_id: Uuid,
         context: &K::Context,
+        mut modifier: F
     ) -> Result<(ClientToken<S::Signature, K>, K::DecapsulationKey), ClientProtocolError>
     where   
         F: FnMut(&mut Token<Pending>)
     {
         // Create the pending token, this involves generating a random body.
-        let token = Token {
+        let mut token = Token {
             protocol,
             sub_protocol,
             id: client_id,
@@ -294,6 +293,8 @@ where
             body: rand::rng().random(),
             _state: PhantomData
         };
+
+        modifier(&mut token);
 
         // Generate the decapsulation & encapsulation keypair.
         let (dk, ek) = K::generate(context)
@@ -322,7 +323,7 @@ where
     /// NOTE: The server should _not_ store the final token as is, it must
     /// be hashed first!
     pub fn server_token(
-        ClientToken { body, signature }: ClientToken<S::Signature, K>,
+        ClientToken { body, signature }: &ClientToken<S::Signature, K>,
         client_pk: &S::Public,
         ctx: &K::Context,
         server_key: &S::Private,
@@ -367,9 +368,10 @@ where
     /// veriifcations to verify the correctness and authenticity of the request,
     /// and then will create the final token.
     pub fn client_token_finish(
+        ServerToken { body, signature }: &ServerToken<HASH_SIZE, K, S::Signature>,
         token: &Token<Pending>,
         decap_key: &K::DecapsulationKey,
-        ServerToken { body, signature }: ServerToken<HASH_SIZE, K, S::Signature>,
+        
         server_pk: &S::Public,
         ctx: &K::Context,
     ) -> Result<Token<Final>, ClientProtocolError> {
@@ -395,8 +397,6 @@ where
             return Err(ClientProtocolError::FailedToReconstructApprovalHash);
         }
 
-
-
         // Compute the final token.
         Ok(new_token)
     }
@@ -408,49 +408,88 @@ where
 
 
 
-#[derive(thiserror::Error, Debug)]
-pub enum ServerProtocolError {
-    #[error("Failed to verify the signature attached to the token.")]
-    FailedToVerifyTokenSignature,
-    #[error("Failed to encapsulation the key.")]
-    EncapsulationFailed,
-    #[error("Failed to sign a response.")]
-    FailedToSignResponse,
-    #[error("Failed to verify that the client cycling actually owns the new key.")]
-    FailedToVerifyNewCycleKey,
-    #[error("Failed to verify that the client cycling owns the old cycling key.")]
-    FailedToVerifyOldKeyDuringCycle,
-    #[error("Failed to verify that the k-proof during registration was generated correctly.")]
-    FailedToVerifyKProof,
-    #[error("Failed to verify that the a-proof during registration was generated by an admin.")]
-    FailedToVerifyAProof
-}
 
-#[derive(thiserror::Error, Debug)]
-pub enum ClientProtocolError {
-    #[error("Failed to generate the digital signing key pair for cycling/registration")]
-    FailedToGenerateDsaPair,
-    #[error("Failed to generate the decap key/encap key pair.")]
-    FailedToGenerateKemPair,
-    #[error("Failed to verify the server signature on the cycle request response.")]
-    InauthenticCycleResponse,
-    #[error("Failed to verify the server signature on the token request response.")]
-    InauthenticTokenResponse,
-    #[error("Failed to decapsulate the ciphertext.")]
-    DecapsulationError,
-    #[error("Failed to sign a message with the client private key.")]
-    FailedToSignRequest,
-    #[error("Failed to generate the k-proof on the original registration request.")]
-    KProofSignError,
-    #[error("Failed to generate the a-proof on the original registration request.")]
-    AProofSignError,
-    #[error("Failed to verify the identity hash which is part of the registration process.")]
-    FailedToVerifyIdentityHash,
-    #[error("Failed to verify the server signature on the register response.")]
-    InauthenticRegisterResponse,
-    #[error("Failed to verify the hash returned by the server on the cycle response.")]
-    FailedToVerifyCycleHash,
-    #[error("Failed to verify the approval hash, as in, the exact hash was not reconstructed on the client end.")]
-    FailedToReconstructApprovalHash
-}
 
+
+#[cfg(test)]
+mod tests {
+    use sha3::Sha3_256;
+    use uuid::Uuid;
+
+    use crate::{algos::{fips203::MlKem512, fips204::MlDsa44}, core::crypto::{token::{MsSinceEpoch, Pending, Token}, DsaSystem, QuantumKitL1}};
+
+    use super::ProtocolKit;
+
+    type Kit = ProtocolKit<MlDsa44, MlKem512, Sha3_256, 32>;
+
+
+
+    fn execute_protocol_run() -> anyhow::Result<(), String> {
+        let (server_public, server_private) = MlDsa44::generate()?;
+        let (admin_public, admin_private) = MlDsa44::generate()?;
+
+
+        let admin_id = Uuid::new_v4();
+        let client_id = Uuid::new_v4();
+
+        
+
+        // Send the original client request.
+        let (req, client_private) = ProtocolKit::<MlDsa44, MlKem512, Sha3_256, 32>::client_register_init(client_id, admin_id, &admin_private).unwrap();
+
+
+        // Perform the server side of registry.
+        let server_registry = QuantumKitL1::server_register(&req, &admin_public, &server_private).unwrap();
+
+
+
+        // Client finishes registry
+        QuantumKitL1::client_register_finish(&server_registry, client_id, &server_public).unwrap();
+
+        // client response
+        let (cycle_init, client_private) = QuantumKitL1::client_cycle_init(client_id, &client_private).unwrap();
+
+
+        let new_public = cycle_init.body.new_public_key.clone();
+
+        // server answers cycle.
+        let serv = ProtocolKit::<MlDsa44, MlKem512, Sha3_256, 32>::server_cycle(&cycle_init, &req.body.public_key, &server_private).unwrap();
+
+        // client sees the server answer.
+        QuantumKitL1::client_cycle_finish(&serv, client_id, &*new_public, &server_public).unwrap();
+
+        // client proposes toen.
+        let (req, decapskey) = QuantumKitL1::client_token_init(0, 0, MsSinceEpoch(0), &client_private, client_id, &(), |t: &mut Token<Pending>| {
+            
+        }).unwrap();
+
+
+        // Server will responsee.
+        let (res, server_final_token) = QuantumKitL1::server_token(&req, &new_public, &(), &server_private).unwrap();
+
+        // Client will see the server response.
+        let client_final_token = QuantumKitL1::client_token_finish(&res, &req.body.token, &decapskey, &server_public, &()).unwrap();
+
+
+
+        assert_eq!(server_final_token, client_final_token);
+
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_protocol_run() -> anyhow::Result<(), &'static str> {
+        execute_protocol_run().unwrap();
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_protocol_run_arbtest() -> anyhow::Result<(), &'static str> {
+        arbtest::arbtest(|_| {
+            execute_protocol_run().unwrap();
+            Ok(())
+        });
+        Ok(())
+    }
+}

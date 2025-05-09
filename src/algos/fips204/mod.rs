@@ -17,6 +17,7 @@ macro_rules! new_pk_cont_ncc_group {
         /// The key container type. This allows us
         /// to more efficiently interact with the underlying bytes
         /// of the public key.
+        #[derive(Debug, Clone, PartialEq, Eq)]
         #[repr(transparent)]
         pub struct $name(pub [u8; $len]);
 

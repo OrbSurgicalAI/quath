@@ -98,15 +98,14 @@ where
 
 #[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
-pub struct ClientRegisterInit<PK, S, A>
+pub struct ClientRegisterInit<PK, S>
 where
     PK: PublicKey,
-    S: Signature,
-    A: Signature,
+    S: Signature
 {
     pub body: ClientRegisterPost<PK>,
     pub k_proof: B64<S>,
-    pub a_proof: B64<A>
+    pub a_proof: B64<S>
 }
 
 #[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]

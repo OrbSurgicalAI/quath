@@ -56,7 +56,7 @@ macro_rules! gen_fips203_kem_variant {
         
         
 
-        impl KEMAlgorithm for fips203::$module_name::KG {
+        impl KEMAlgorithm for $primary {
             type EncapsulationKey = fips203::$module_name::EncapsKey;
             type DecapsulationKey = fips203::$module_name::DecapsKey;
             type CipherText = fips203::$module_name::CipherText;
@@ -109,16 +109,17 @@ gen_fips203_kem_variant!(MlKem1024, ml_kem_1024);
 mod tests {
     use fips203::ml_kem_512::KG;
 
-    use crate::core::crypto::KEMAlgorithm;
+
+    use crate::{algos::fips203::MlKem512, core::crypto::KEMAlgorithm};
 
 
 
     #[test]
     pub fn test_fips203_kem() {
         
-        let (dk, ek) = KG::generate(&()).unwrap();
-        let (ct, server_ss) = KG::encapsulate(&ek, &()).unwrap();
-        let client_ss = KG::decapsulate(&dk, &ct, &()).unwrap();
+        let (dk, ek) = MlKem512::generate(&()).unwrap();
+        let (ct, server_ss) = MlKem512::encapsulate(&ek, &()).unwrap();
+        let client_ss = MlKem512::decapsulate(&dk, &ct, &()).unwrap();
         assert_eq!(server_ss, client_ss);
 
     }

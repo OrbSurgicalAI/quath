@@ -5,11 +5,16 @@ pub mod token;
 pub mod specials;
 pub mod mem;
 pub mod opcode;
+mod error;
+mod simple;
 
 pub mod data;
 
+
 use crate::algos::parse_into_fixed_length;
 pub use crate::core::crypto::data::*;
+pub use error::*;
+pub use simple::*;
 
 
 
