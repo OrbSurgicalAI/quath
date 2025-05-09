@@ -1,14 +1,13 @@
-use std::{marker::PhantomData, ops::Deref};
+use std::marker::PhantomData;
 
 use bitvec::array::BitArray;
 use rand::Rng;
-use sha3::Sha3_256;
 use uuid::Uuid;
 
 
 
 use super::{
-    mem::B64, opcode::OpCode, token::{Final, MsSinceEpoch, Pending, Token}, ClientProtocolError, ClientRegisterInit, DsaSystem, FixedByteRepr, HashingAlgorithm, KEMAlgorithm, PrivateKey, PublicKey, ServerProtocolError, Signature, ViewBytes
+    mem::B64, opcode::OpCode, token::{Final, Pending, Token}, ClientProtocolError, ClientRegisterInit, DsaSystem, HashingAlgorithm, KEMAlgorithm, MsSinceEpoch, PrivateKey, PublicKey, ServerProtocolError, TokenValidityInterval, ViewBytes
 };
 
 
@@ -16,6 +15,17 @@ use super::data::*;
 
 
 pub type UniformSignedProtocol<S, K, H, const H_SIZE: usize> = ProtocolKit<S, K, H, H_SIZE>;
+
+pub type ClientProtocolResult<T> = Result<T, ClientProtocolError>;
+pub type ServerProtocolResult<T> = Result<T, ServerProtocolError>;
+
+
+pub type ServerTokenResult<const H: usize, K, S> = ServerProtocolResult<(ServerToken<H, K, S>, Token<Final>)>;
+pub type ClientTokenResult<S, K, D> = ClientProtocolResult<(ClientToken<S, K>, D)>; 
+pub type ClientCycleResult<PUB, S, PRIV> = ClientProtocolResult<(CycleInit<PUB, S>, PRIV)>;
+pub type ClientRegisterResult<PUB, SIG, PRIV> = ClientProtocolResult<(ClientRegisterInit<PUB, SIG>, PRIV)>;
+
+
 
 pub struct ProtocolKit<S, K, H, const HASH_SIZE: usize> {
     _s: PhantomData<S>,
@@ -33,8 +43,7 @@ where
     /// Initiates client registration. We start by proposing a new [Uuid], which the server
     /// will only approve if it is unique. We then provide two proofs:
     /// 
-    /// 1. The first proof states that we do actually own the key. Although this is not
-    /// strictly a necessary security condition, it prevents clients from registering null entities.
+    /// 1. The first proof states that we do actually own the key. Although this is not strictly a necessary security condition, it prevents clients from registering null entities.
     /// 
     /// 2. The second proof states that the administrator actually approves of this rquest.
     /// 
@@ -44,7 +53,7 @@ where
         client_id: Uuid,
         admin_id: Uuid,
         admin_priv: &S::Private,
-    ) -> Result<(ClientRegisterInit<S::Public, S::Signature>, S::Private), ClientProtocolError> {
+    ) -> ClientRegisterResult<S::Public, S::Signature, S::Private> {
         let (public, private) = S::generate().map_err(|_| ClientProtocolError::FailedToGenerateDsaPair)?;
 
 
@@ -79,17 +88,13 @@ where
     /// The server register method takes in the client request and performs several checks. The primary
     /// purpose of this method is to verify that the client is legitimate. The checks are as follows:
     /// 
-    /// 1. The client's k-proof, which is the proof used to show they own the key they want to submit
-    /// is verifiable with the public key that was submitted. Hence implying they do actually own this
-    /// private key.
+    /// 1. The client's k-proof, which is the proof used to show they own the key they want to submit is verifiable with the public key that was submitted. Hence implying they do actually own this private key.
     /// 
-    /// 2. The client's ID is unique. This is actually a precondition of this function call, this function
-    /// call makes no assumptions about the backend and thus cannot verify that.
+    /// 2. The client's ID is unique. This is actually a precondition of this function call, this function call makes no assumptions about the backend and thus cannot verify that.
     /// 
     /// 3. The client's public key is unique. 
     /// 
-    /// The parameters of this method include the actual request, the correspondng admin public key, and the
-    /// server key that will be used to sign this request.
+    /// The parameters of this method include the actual request, the correspondng admin public key, and the server key that will be used to sign this request.
     /// 
     /// # Preconditions
     /// The client ID is unique.
@@ -98,11 +103,11 @@ where
         client: &ClientRegisterInit<S::Public, S::Signature>,
         admin_public_key: &S::Public,
         server_key: &S::Private,
-    ) -> Result<ServerRegister<S::Signature, HASH_SIZE>, ServerProtocolError> {
+    ) -> ServerProtocolResult<ServerRegister<S::Signature, HASH_SIZE>> {
         if !client
             .body
             .public_key
-            .verify(&*client.body.bytes(), &*client.k_proof)
+            .verify(&client.body.bytes(), &*client.k_proof)
         {
             return Err(ServerProtocolError::FailedToVerifyKProof);
         }
@@ -136,7 +141,7 @@ where
         in_resp: &ServerRegister<S::Signature, HASH_SIZE>,
         client_id: Uuid,
         server_public: &S::Public,
-    ) -> Result<(), ClientProtocolError> {
+    ) -> ClientProtocolResult<()> {
 
         // Verify the hash is actually correct by calculating it against
         // our stored client ID.
@@ -155,16 +160,18 @@ where
 
     /// Initializes a cycle on the client's end. To do so, we need the client [Uuid] and the current
     /// private key. This will perform the following steps.
+    /// 
     /// 1. Generate a new key pair.
     /// 2. Generate a response.
     /// 3. Sign the response with the new key.
     /// 4. Sign the previous signature with the old key.
+    /// 
     /// This format of proof is identical to the registration step, except that the client authorizes
     /// on it's own behalf.
     pub fn client_cycle_init(
         client_id: Uuid,
         old_private: &S::Private,
-    ) -> Result<(CycleInit<S::Public, S::Signature>, S::Private), ClientProtocolError> {
+    ) -> ClientCycleResult<S::Public, S::Signature, S::Private> {
 
         // Generate the new key pair.
         let (new_public, new_private) = S::generate()
@@ -206,7 +213,7 @@ where
         in_msg: &CycleInit<S::Public, S::Signature>,
         client_public: &S::Public,
         server_private: &S::Private,
-    ) -> Result<ServerCycle<HASH_SIZE, S::Signature>, ServerProtocolError> {
+    ) -> ServerProtocolResult<ServerCycle<HASH_SIZE, S::Signature>> {
 
         // We need to check that the client actually owns the new
         // key being proposed.
@@ -245,7 +252,7 @@ where
         client_id: Uuid,
         proposed_public_key: &S::Public,
         server_public: &S::Public,
-    ) -> Result<(), ClientProtocolError> {
+    ) -> ClientProtocolResult<()> {
 
         // Calculate the hash to verify that it actually corresponds to that of the server.
         let calculated = H::hash_sequence(&[ &client_id.to_bytes_le(), &proposed_public_key.view() ]);
@@ -279,7 +286,7 @@ where
         client_id: Uuid,
         context: &K::Context,
         mut modifier: F
-    ) -> Result<(ClientToken<S::Signature, K>, K::DecapsulationKey), ClientProtocolError>
+    ) -> ClientTokenResult<S::Signature, K, K::DecapsulationKey>
     where   
         F: FnMut(&mut Token<Pending>)
     {
@@ -327,12 +334,18 @@ where
         client_pk: &S::Public,
         ctx: &K::Context,
         server_key: &S::Private,
-    ) -> Result<(ServerToken<HASH_SIZE, K, S::Signature>, Token<Final>), ServerProtocolError> {
+        interval: &TokenValidityInterval,
+        current_time: MsSinceEpoch
+    ) -> ServerTokenResult<HASH_SIZE, K, S::Signature> {
 
+        // The token is out of the interval here.
+        if !interval.check_time_validity(current_time, body.token.timestamp) {
+            return Err(ServerProtocolError::TokenOutOfInterval);
+        }
 
 
         // Verify the client actually sent this request.
-        if !client_pk.verify(&body.to_bytes(), &signature) {
+        if !client_pk.verify(&body.to_bytes(), signature) {
             return Err(ServerProtocolError::FailedToVerifyTokenSignature)?;
         }
 
@@ -374,12 +387,12 @@ where
         
         server_pk: &S::Public,
         ctx: &K::Context,
-    ) -> Result<Token<Final>, ClientProtocolError> {
+    ) -> ClientProtocolResult<Token<Final>> {
 
 
       
         // Verify the body hash.
-        if !server_pk.verify(&body.to_bytes(), &signature) {
+        if !server_pk.verify(&body.to_bytes(), signature) {
             return Err(ClientProtocolError::InauthenticTokenResponse);
         }
 
@@ -409,18 +422,14 @@ where
 
 
 
-
-
 #[cfg(test)]
 mod tests {
     use sha3::Sha3_256;
     use uuid::Uuid;
 
-    use crate::{algos::{fips203::MlKem512, fips204::MlDsa44}, core::crypto::{token::{MsSinceEpoch, Pending, Token}, DsaSystem, QuantumKitL1}};
+    use crate::{algos::{fips203::MlKem512, fips204::MlDsa44}, core::crypto::{token::{Pending, Token}, DsaSystem, MsSinceEpoch, QuantumKitL1, TokenValidityInterval}};
 
     use super::ProtocolKit;
-
-    type Kit = ProtocolKit<MlDsa44, MlKem512, Sha3_256, 32>;
 
 
 
@@ -459,13 +468,13 @@ mod tests {
         QuantumKitL1::client_cycle_finish(&serv, client_id, &*new_public, &server_public).unwrap();
 
         // client proposes toen.
-        let (req, decapskey) = QuantumKitL1::client_token_init(0, 0, MsSinceEpoch(0), &client_private, client_id, &(), |t: &mut Token<Pending>| {
+        let (req, decapskey) = QuantumKitL1::client_token_init(0, 0, MsSinceEpoch(0), &client_private, client_id, &(), |_: &mut Token<Pending>| {
             
         }).unwrap();
 
 
         // Server will responsee.
-        let (res, server_final_token) = QuantumKitL1::server_token(&req, &new_public, &(), &server_private).unwrap();
+        let (res, server_final_token) = QuantumKitL1::server_token(&req, &new_public, &(), &server_private, &TokenValidityInterval::from_seconds(0, 0), MsSinceEpoch(0)).unwrap();
 
         // Client will see the server response.
         let client_final_token = QuantumKitL1::client_token_finish(&res, &req.body.token, &decapskey, &server_public, &()).unwrap();

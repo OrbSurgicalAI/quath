@@ -23,11 +23,7 @@ impl ToBytes for EphemeralSecret<Secp256k1> {
     }
 }
 
-impl FixedByteRepr<32> for SharedSecret<Secp256k1> {
-    fn to_fixed_repr(&self) -> [u8; 32] {
-        self.raw_secret_bytes().clone().try_into().unwrap()
-    }
-}
+
 
 impl KEMAlgorithm for K256ECDH {
     type Context = ();

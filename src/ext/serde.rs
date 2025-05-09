@@ -1,11 +1,10 @@
-use std::{borrow::Cow, fmt::{Debug, Display}, marker::PhantomData, ops::Deref};
+use std::{borrow::Cow, fmt::Display};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use chrono::DateTime;
 use serde::{de::Visitor, Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::core::crypto::{mem::B64, opcode::OpCode, token::MsSinceEpoch, Parse, Signature, ViewBytes};
+use crate::core::crypto::{mem::B64, opcode::OpCode, MsSinceEpoch, Parse, ViewBytes};
 
 
 // #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -56,14 +55,14 @@ impl<'de> Visitor<'de> for B64Visitor {
  
 }
 
-impl<'a> Serialize for InternalB64SerContainer<'a> {
+impl Serialize for InternalB64SerContainer<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer {
         if serializer.is_human_readable() {
             BASE64_STANDARD.encode(&self.0).serialize(serializer)
         } else {
-            serializer.collect_seq(self.0.into_iter())
+            serializer.collect_seq(&*self.0)
         }
     }
 }
@@ -108,7 +107,7 @@ where
         where
             D: serde::Deserializer<'de> {
         let InternalB64SerContainer(inner) = InternalB64SerContainer::deserialize(deserializer)?;
-        let wow = T::parse_bytes(&*inner).map_err(serde::de::Error::custom)?;
+        let wow = T::parse_bytes(&inner).map_err(serde::de::Error::custom)?;
 
         Ok(B64(wow))
 
@@ -126,7 +125,7 @@ impl Serialize for OpCode {
         where
             S: serde::Serializer {
         if serializer.is_human_readable() {
-            serializer.serialize_str(&self.to_static_str())
+            serializer.serialize_str(self.to_static_str())
         } else {
             serializer.serialize_u8(self.to_code())
         }
@@ -136,7 +135,7 @@ impl Serialize for OpCode {
 struct OpCodeVisitor;
 
 
-impl<'v> Visitor<'v> for OpCodeVisitor {
+impl Visitor<'_> for OpCodeVisitor {
     type Value = OpCode;
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter.write_str("expecting qualified opcode")
@@ -238,7 +237,7 @@ impl Serialize for MsSinceEpoch {
 
 struct MsSinceEpochVisitor;
 
-impl<'v> Visitor<'v> for MsSinceEpochVisitor {
+impl Visitor<'_> for MsSinceEpochVisitor {
     type Value = MsSinceEpoch;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -247,7 +246,7 @@ impl<'v> Visitor<'v> for MsSinceEpochVisitor {
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
         where
             E: serde::de::Error, {
-        let value = DateTime::parse_from_rfc3339(&v).map_err(E::custom)?;
+        let value = DateTime::parse_from_rfc3339(v).map_err(E::custom)?;
         Ok(MsSinceEpoch(value.timestamp_millis()))
     }
 }
@@ -275,11 +274,11 @@ impl<'de> Deserialize<'de> for MsSinceEpoch {
 mod tests {
     use std::borrow::Cow;
 
-    use serde::{Deserialize, Serialize, Serializer};
+    use serde::Deserialize;
     use serde_test::{assert_ser_tokens, assert_tokens, Configure, Token};
-    use uuid::{uuid, Uuid};
 
-    use crate::core::crypto::{mem::B64, opcode::OpCode, token::MsSinceEpoch, ServerCycleBody, Signature, ViewBytes};
+
+    use crate::core::crypto::{mem::B64, opcode::OpCode, MsSinceEpoch, ServerCycleBody};
 
     use super::InternalB64SerContainer;
 
@@ -354,8 +353,8 @@ mod tests {
 
     
         assert_tokens(&sig.clone().compact(), &[
-            Token::Tuple { len: 0 },
-            Token::TupleEnd
+            Token::Seq { len: Some(0) },
+            Token::SeqEnd
         ]);
 
         assert_ser_tokens(&sig.readable(), &[

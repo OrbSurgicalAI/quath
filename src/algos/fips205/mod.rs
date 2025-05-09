@@ -1,5 +1,5 @@
-use fips205::traits::{KeyGen, SerDes, Signer, Verifier};
 
+use fips205::traits::{SerDes, Signer, Verifier};
 use fips205::*;
 
 use crate::algos::parse_into_fixed_length;

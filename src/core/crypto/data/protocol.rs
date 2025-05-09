@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::core::crypto::{mem::B64, opcode::OpCode, token::{Pending, Token}, DsaSystem, KEMAlgorithm, PublicKey, Signature, ViewBytes};
+use crate::core::crypto::{mem::B64, opcode::OpCode, token::{Pending, Token}, KEMAlgorithm, PublicKey, Signature, ViewBytes};
 
 
 #[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]

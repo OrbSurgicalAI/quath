@@ -1,4 +1,4 @@
-use fips203::{traits::{Decaps, Encaps, KeyGen, SerDes}, *};
+use fips203::traits::{SerDes, KeyGen, Encaps, Decaps};
 use crate::core::crypto::*;
 
 use super::parse_into_fixed_length;
@@ -92,7 +92,7 @@ impl<'a> Parse<'a> for fips203::SharedSecretKey {
 }
 
 impl ViewBytes for fips203::SharedSecretKey {
-    fn view<'a>(&'a self) -> std::borrow::Cow<'a, [u8]> {
+    fn view(&self) -> std::borrow::Cow<'_, [u8]> {
         self.clone().into_bytes().to_vec().into()
     }
 }
@@ -107,7 +107,6 @@ gen_fips203_kem_variant!(MlKem1024, ml_kem_1024);
 
 #[cfg(test)]
 mod tests {
-    use fips203::ml_kem_512::KG;
 
 
     use crate::{algos::fips203::MlKem512, core::crypto::KEMAlgorithm};

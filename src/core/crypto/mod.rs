@@ -7,6 +7,7 @@ pub mod mem;
 pub mod opcode;
 mod error;
 mod simple;
+mod time;
 
 pub mod data;
 
@@ -15,7 +16,7 @@ use crate::algos::parse_into_fixed_length;
 pub use crate::core::crypto::data::*;
 pub use error::*;
 pub use simple::*;
-
+pub use time::*;
 
 
 pub trait Signature: ViewBytes + for<'a> Parse<'a> {
@@ -23,6 +24,9 @@ pub trait Signature: ViewBytes + for<'a> Parse<'a> {
 }
 
 
+pub trait FixedByteRepr<const N: usize> {
+    fn to_fixed_repr(&self) -> [u8; N];
+}
 
 
 
@@ -97,13 +101,13 @@ impl<'a, const N: usize> Parse<'a> for [u8; N] {
 /// return owned values.
 pub trait ViewBytes {
     
-    fn view<'a>(&'a self) -> Cow<'a, [u8]>;
+    fn view(&self) -> Cow<'_, [u8]>;
 }
 
 
 
 impl<const N: usize> ViewBytes for [u8; N] {
-    fn view<'a>(&'a self) -> Cow<'a, [u8]> {
+    fn view(&self) -> Cow<'_, [u8]> {
         Cow::Borrowed(self)
     }
 }
@@ -112,10 +116,6 @@ impl<const N: usize> Signature for [u8; N] {
     fn from_byte(seq: &[u8]) -> Self {
         seq.try_into().unwrap()
     }
-}
-
-pub trait FixedByteRepr<const N: usize> {
-    fn to_fixed_repr(&self) -> [u8; N];
 }
 
 

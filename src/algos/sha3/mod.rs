@@ -1,6 +1,5 @@
-use sha3::{digest::core_api::CoreWrapper, Digest, Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256, TurboShake128, TurboShake256};
-
-use crate::core::crypto::{HashingAlgorithm};
+use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Digest};
+use crate::core::crypto::HashingAlgorithm;
 
 
 macro_rules! impl_hashing_fn {

@@ -1,11 +1,10 @@
 use std::{borrow::Cow, marker::PhantomData, ops::Range};
 
 use bitvec::{array::BitArray, order::Lsb0};
-use fips204::Ph;
 use rand::Rng;
 use uuid::Uuid;
 
-use super::{FixedByteRepr, KEMAlgorithm, Parse, ViewBytes};
+use super::{FixedByteRepr, KEMAlgorithm, MsSinceEpoch, Parse, ViewBytes};
 
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +53,7 @@ impl<K> Token<K> {
 }
 
 impl<K> ViewBytes for Token<K> {
-    fn view<'a>(&'a self) -> std::borrow::Cow<'a, [u8]> {
+    fn view(&self) -> std::borrow::Cow<'_, [u8]> {
         Cow::Owned(self.to_fixed_bytes().to_vec())
     }
 }
@@ -133,21 +132,18 @@ impl Token<Pending> {
 
 
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Eq, Ord)]
-pub struct MsSinceEpoch(pub i64);
-
 
 #[cfg(test)]
 mod tests {
     use std::{marker::PhantomData, time::Duration};
 
     use arbitrary::Arbitrary;
-    use bitvec::{array::BitArray, vec::BitVec};
+    use bitvec::array::BitArray;
     use uuid::Uuid;
 
-    use crate::core::crypto::{Parse, ViewBytes};
+    use crate::core::crypto::{MsSinceEpoch, Parse, ViewBytes};
 
-    use super::{MsSinceEpoch, Pending, Token};
+    use super::{Pending, Token};
 
 
     impl<'a> Arbitrary<'a> for Token<Pending> {
@@ -156,7 +152,7 @@ mod tests {
                 id: Uuid::from_u128(u.arbitrary()?),
                 permissions: BitArray::from(<[u8; 16]>::arbitrary(u)?),
                 body: <[u8; 32]>::arbitrary(u)?,
-                timestamp: super::MsSinceEpoch(i64::arbitrary(u)?),
+                timestamp: MsSinceEpoch(i64::arbitrary(u)?),
                 sub_protocol: u.arbitrary()?,
                 protocol: u.arbitrary()?,
                 _state: PhantomData

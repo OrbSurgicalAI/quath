@@ -8,6 +8,9 @@ default = ["sha3", "fips203", "fips204", "fips205", "sha2", "chrono", "serde" ] 
 
 serde = [ "base64", "dep:serde", "chrono" ]
 
+ecdsa = [ "k256/ecdsa" ]
+ecdh = ["k256/ecdh"]
+
 [dependencies]
 chrono = { version = "0.4.40", features = ["arbitrary", "serde"], optional=true }
 fips204 = { version = "0.4.6", optional=true }
