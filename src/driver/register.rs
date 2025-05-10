@@ -271,7 +271,6 @@ where
 mod tests {
     use std::task::Poll;
 
-    use bincode::de;
     use fips204::ml_dsa_44::PrivateKey;
     use sha3::Sha3_256;
     use uuid::Uuid;
@@ -285,11 +284,9 @@ mod tests {
 
     struct SetupDetails {
         driver: Driver,
-        client_pk: MlDsa44Public,
-        client_sk: PrivateKey,
+
         admin_pk: MlDsa44Public,
-        admin_sk: PrivateKey,
-        server_pk: MlDsa44Public,
+
         server_sk: PrivateKey,
         client_id: Uuid,
         admin_id: Uuid,
@@ -297,7 +294,6 @@ mod tests {
 
     fn setup_driver() -> SetupDetails {
         let (admin_pk, admin_sk) = MlDsa44::generate().unwrap();
-        let (client_pk, client_sk) = MlDsa44::generate().unwrap();
         let (server_pk, server_sk) = MlDsa44::generate().unwrap();
 
         let admin_id = Uuid::new_v4();
@@ -307,11 +303,7 @@ mod tests {
 
         SetupDetails {
             driver,
-            client_pk,
-            client_sk,
             admin_pk,
-            admin_sk,
-            server_pk,
             server_sk,
             client_id,
             admin_id,

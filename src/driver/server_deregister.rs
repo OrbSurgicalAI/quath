@@ -1,7 +1,6 @@
 use std::{marker::PhantomData, task::Poll};
 
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
-use uuid::Uuid;
 
 use crate::{
     protocol::ProtocolKit, ClientDeregister, DeregisterEntityQuery, DsaSystem, GetPublicKeyQuery, HashingAlgorithm, KemAlgorithm, KeyFetchResponse, KeyFetchResult, ServerDeregister, ServerProtocolError

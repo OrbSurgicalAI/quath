@@ -1,15 +1,11 @@
 use std::{marker::PhantomData, task::Poll};
 
-use fips204::Ph;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
-use uuid::Uuid;
 
 use crate::{
-    ClientDeregister, ClientProtocolError, DsaSystem, HashingAlgorithm, KemAlgorithm,
-    ServerDeregister, ServerErrorResponse, protocol::ProtocolKit,
+    ClientProtocolError, ServerErrorResponse,
 };
 
-use super::ClientRevokeOutput;
 
 pub(crate) struct ClientSingleDriver<C, CO, REQ, RES> {
     inner: ClientSingleDriverInner<C, CO, REQ, RES>,

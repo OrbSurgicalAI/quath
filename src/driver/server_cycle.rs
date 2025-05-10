@@ -319,7 +319,7 @@ fn test_server_cycle_happy_path() {
 
     let (old_client_pk, old_client_sk) = FauxChain::generate().unwrap();
 
-    let (cycle_init, new_private) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_cycle_init(setup.client_id, &old_client_sk).unwrap();
+    let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_cycle_init(setup.client_id, &old_client_sk).unwrap();
 
     driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())));
 
@@ -422,7 +422,7 @@ fn test_server_cycle_fails_on_misc_error() {
 
 #[test]
 fn test_server_cycle_fails_on_storage_error() {
-    use crate::{ServerCycleDriver, ServerCycleInput, ServerCycleOutput, CycleVerifyStatus, ServerPollResult, ServerProtocolError, MsSinceEpoch};
+    use crate::{ServerCycleDriver, ServerCycleInput, CycleVerifyStatus, ServerPollResult, ServerProtocolError, MsSinceEpoch};
     use crate::core::crypto::specials::{FauxChain, FauxKem};
     use sha3::Sha3_256;
 

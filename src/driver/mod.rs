@@ -22,7 +22,7 @@ pub use server_revoke::*;
 pub use server_deregister::*;
 pub use client_revoke::*;
 pub use client_deregister::*;
-pub use client_single::*;
+pub(crate) use client_single::*;
 
 use crate::ServerProtocolError;
 
@@ -30,16 +30,15 @@ pub type ServerPollResult<T> = Poll<Result<T, ServerProtocolError>>;
 
 #[cfg(test)]
 mod tests {
-    use std::{task::Poll, time::Duration};
+    use std::task::Poll;
 
     use sha3::Sha3_256;
-    use uuid::Uuid;
 
     use crate::{
         specials::{FauxChain, FauxKem}, testutil::BasicSetupDetails, MsSinceEpoch, StoreRegistryQuery, VerifyRequestIntegrityQuery
     };
 
-    use super::{ClientDriver, RegistryDriver, RegistryOutput, ServerRegistryDriver, ServerRegistryOutput};
+    use super::{RegistryDriver, RegistryOutput, ServerRegistryDriver, ServerRegistryOutput};
 
     #[test]
     pub fn registry_tandem_happy() {
@@ -65,13 +64,13 @@ mod tests {
 
         reg_server_driver.recv(MsSinceEpoch(0), Some(super::ServerRegistryInput::ClientRequest(inner)));
         
-        let ServerRegistryOutput::VerifyRequestIntegrity(VerifyRequestIntegrityQuery { requested_id, admin_id, public_key }) = reg_server_driver.poll_transmit().unwrap() else {
+        let ServerRegistryOutput::VerifyRequestIntegrity(VerifyRequestIntegrityQuery { .. }) = reg_server_driver.poll_transmit().unwrap() else {
             panic!("server did not try to verify the request integrity.");
         };
 
         reg_server_driver.recv(MsSinceEpoch(0),  Some(super::ServerRegistryInput::VerificationResponse(super::VerifyRequestIntegrityResponse::Success { admin_public: setup.admin_pk.clone() })));
 
-        let ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { client_id, public_key, time }) = reg_server_driver.poll_transmit().unwrap() else {
+        let ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { .. }) = reg_server_driver.poll_transmit().unwrap() else {
             panic!("server did not try to store.");
         };
 
@@ -87,7 +86,7 @@ mod tests {
 
         
 
-        let Poll::Ready(inner) = reg_client_driver.poll_completion() else {
+        let Poll::Ready(_) = reg_client_driver.poll_completion() else {
             panic!("clien did not complete registry.");
         };
 

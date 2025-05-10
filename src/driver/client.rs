@@ -539,7 +539,7 @@ mod tests {
 
         // Step 4: Client should emit cycle key storage and cycle request
         let store_key = driver.poll_transmit().unwrap();
-        let ClientOutput::StoreNewCycleKey((_, new_priv)) = store_key else {
+        let ClientOutput::StoreNewCycleKey((_, _)) = store_key else {
             panic!("Expected new cycle key storage");
         };
 
@@ -576,19 +576,16 @@ mod tests {
         use crate::{
             algos::{fips203::MlKem512, fips204::MlDsa44},
             core::crypto::{
-                DsaSystem, MsSinceEpoch, TokenValidityInterval,
-                protocol::ProtocolKit,
-                token::{Pending, Token},
+                DsaSystem, MsSinceEpoch,
             },
         };
         use sha3::Sha3_256;
-        use std::time::Duration;
         use uuid::Uuid;
 
         use super::{ClientDriver, ClientInput, ClientOutput, ProtocolSpec};
-        use std::task::Poll;
 
-        let (client_pk, client_sk) = MlDsa44::generate().unwrap();
+
+        let (_, client_sk) = MlDsa44::generate().unwrap();
         let (server_pk, _server_sk) = MlDsa44::generate().unwrap();
 
         let mut driver = ClientDriver::<MlDsa44, MlKem512, Sha3_256, 32>::new(
@@ -810,7 +807,7 @@ mod tests {
             panic!("Expected TokenRequest");
         };
 
-        let (response, expected_token) = ProtocolKit::<MlDsa44, MlKem512, Sha3_256, 32>::server_token(
+        let (response, _) = ProtocolKit::<MlDsa44, MlKem512, Sha3_256, 32>::server_token(
             &req,
             &client_pk,
             &server_sk,

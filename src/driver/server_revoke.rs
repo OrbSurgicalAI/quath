@@ -1,7 +1,6 @@
 use std::{marker::PhantomData, task::Poll};
 
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
-use uuid::Uuid;
 
 use crate::{
     protocol::ProtocolKit, ClientRevoke, DsaSystem, GetPublicKeyQuery, HashingAlgorithm, KemAlgorithm, KeyFetchResponse, KeyFetchResult, RevokeTokenQuery, ServerProtocolError, ServerRevoke, TokenRevocationStatus
@@ -40,7 +39,6 @@ where
     Init,
     WaitingForPublicKeyFetch(Option<ClientRevoke<S::Signature, N>>),
     WaitingForRevocation {
-        public_key: S::Public,
         request: Option<ServerRevoke<S::Signature, N>>,
     },
 
@@ -136,8 +134,7 @@ where
         }
         DriverState::WaitingForRevocation {
             request,
-            public_key,
-        } => handle_revocation_wait(&mut obj.inner, packet, request, public_key)?,
+        } => handle_revocation_wait(&mut obj.inner, packet, request)?,
         _ => None, // The other states do not have any active behaviour.
     };
 
@@ -217,8 +214,7 @@ where
             )?;
 
             Ok(Some(DriverState::WaitingForRevocation {
-                request: Some(request),
-                public_key: key,
+                request: Some(request)
             }))
             },
             KeyFetchResult::InvalidClaimant => Err(ServerProtocolError::InvalidClientUuid),
@@ -232,8 +228,7 @@ where
 fn handle_revocation_wait<S, K, H, const N: usize>(
     inner: &mut ServerRevokeDriverInner<S, K, H, N>,
     packet: Option<ServerRevokeInput<S, N>>,
-    request: &mut Option<ServerRevoke<S::Signature, N>>,
-    public_key: &mut S::Public,
+    request: &mut Option<ServerRevoke<S::Signature, N>>
 ) -> Result<Option<DriverState<S, N>>, ServerProtocolError>
 where
     S: DsaSystem,
@@ -315,7 +310,7 @@ mod tests {
         // send another
         driver.recv(Some(ServerRevokeInput::RevokeResponse(crate::TokenRevocationStatus::Confirmed)));
 
-        if let Poll::Ready(Ok(respo)) = driver.poll_result() {
+        if let Poll::Ready(Ok(_)) = driver.poll_result() {
         } else {
             panic!("Expected poll ready.");
         }

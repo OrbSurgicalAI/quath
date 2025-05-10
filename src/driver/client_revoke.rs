@@ -143,7 +143,7 @@ where
     H: HashingAlgorithm<N>,
 {
     let state = match &mut obj.state {
-        DriverState::Init => handle_registry_init(&mut obj.inner, packet)?,
+        DriverState::Init => handle_registry_init(&mut obj.inner)?,
         DriverState::WaitingOnServer(sig) => handle_registry_done(&mut obj.inner, packet, sig)?,
         _ => None, // The other states do not have any active behaviour.
     };
@@ -158,8 +158,7 @@ where
 
 
 fn handle_registry_init<S, K, H, const N: usize>(
-    inner: &mut ClientRevokeDriverInner<S, K, H, N>,
-    packet: Option<ClientRevokeInput<S, N>>,
+    inner: &mut ClientRevokeDriverInner<S, K, H, N>
 ) -> Result<Option<DriverState<S>>, ClientProtocolError>
 where
     S: DsaSystem,
@@ -270,6 +269,7 @@ fn test_client_revoke_signature_verification_failure() {
 
     driver.recv(None);
 
+    #[allow(irrefutable_let_patterns)]
     let ClientRevokeOutput::Request(request) = driver.poll_transmit().unwrap() else {
         panic!("Expected request output");
     };

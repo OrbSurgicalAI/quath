@@ -1,15 +1,12 @@
 use std::{marker::PhantomData, task::Poll};
 
-use bitvec::array::BitArray;
-use fips204::Ph;
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
-use uuid::Uuid;
 
 use crate::{
-    token::{Final, Token}, CheckTokenQuery, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerProtocolError, TokenValidityInterval, ViewBytes
+    token::{Final, Token}, CheckTokenQuery, HashingAlgorithm, MsSinceEpoch, ServerProtocolError, TokenValidityInterval, ViewBytes
 };
 
-use super::{ServerPollResult, ServerTokenDriverInner, ServerTokenInput};
+use super::ServerPollResult;
 
 pub struct ServerVerifyDriver<H, const N: usize>
 where
@@ -204,14 +201,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{task::Poll, time::Duration};
+    use std::task::Poll;
 
  
     use sha3::Sha3_256;
     use uuid::Uuid;
 
     use crate::{
-        token::{Final, Pending, Token}, CheckTokenQuery, HashingAlgorithm, MsSinceEpoch, ServerProtocolError, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput, TokenValidityInterval, ViewBytes
+        token::{Pending, Token}, CheckTokenQuery, HashingAlgorithm, MsSinceEpoch, ServerProtocolError, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput, TokenValidityInterval, ViewBytes
     };
 
     #[test]

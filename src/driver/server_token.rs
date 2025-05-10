@@ -384,8 +384,7 @@ mod tests {
 
         // Check the verification request.
         let ServerTokenOutput::VerificationRequest(VerifyTokenQuery {
-            client_id,
-            token_hash,
+            ..
         }) = driver.poll_transmit().unwrap()
         else {
             panic!("Expected verification request, got something else.");
@@ -403,10 +402,9 @@ mod tests {
         );
 
         let ServerTokenOutput::StorageRequest(StoreTokenQuery {
-            client_id,
+          
             token_hash: server_token_hash,
-            token_stamp_time,
-            token_expiry_time,
+            ..
         }) = driver.poll_transmit().unwrap()
         else {
             panic!("Expected a storage request, found somehing else!");

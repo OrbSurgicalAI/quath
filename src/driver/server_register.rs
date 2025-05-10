@@ -1,7 +1,6 @@
 use std::{marker::PhantomData, task::Poll};
 
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
-use uuid::Uuid;
 
 use crate::{core::crypto::{
     protocol::ProtocolKit, ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerProtocolError, ServerRegister
@@ -309,7 +308,6 @@ mod tests {
     use crate::{
         ViewBytes,
         core::crypto::{
-            ServerRegister,
             protocol::ProtocolKit,
             specials::{FauxChain, FauxKem},
         },
@@ -327,7 +325,6 @@ mod tests {
         pub admin_pk: FauxPublic,
         pub admin_sk: FauxPrivate,
         pub server_pk: FauxPublic,
-        pub server_sk: FauxPrivate,
     }
 
     fn setup_driver() -> SetupDetails {
@@ -344,8 +341,7 @@ mod tests {
             admin_id,
             admin_sk,
             server_pk,
-            admin_pk,
-            server_sk,
+            admin_pk
         }
     }
 
@@ -353,7 +349,7 @@ mod tests {
     fn test_driver_happy_path() {
         let mut setup = setup_driver();
 
-        let (request, client_sk) =
+        let (request, _) =
             ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_register_init(
                 setup.client_id,
                 setup.admin_id,
@@ -752,7 +748,7 @@ fn test_store_registry_output_after_successful_verification() {
     // Check for StoreRegistry output
     let output = setup.driver.poll_transmit();
     match output {
-        Some(ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { client_id, public_key, time })) => {
+        Some(ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { client_id, public_key, .. })) => {
             assert_eq!(client_id, setup.client_id);
             assert_eq!(public_key.view(), client_pk.view());
             // assert_eq!(time, setup.time);

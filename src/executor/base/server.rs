@@ -4,7 +4,7 @@ use bitvec::array::BitArray;
 use uuid::Uuid;
 
 use crate::{
-    token::{Final, Token}, CheckTokenStatus, ClientDeregister, ClientRegisterInit, ClientRevoke, ClientToken, CycleInit, CycleVerifyStatus, DeregisterStatus, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerCycleDriver, ServerCycleOutput, ServerDeregister, ServerDeregisterDriver, ServerDeregisterInput, ServerDeregisterOutput, ServerProtocolError, ServerRegister, ServerRegistryDriver, ServerRegistryInput, ServerRegistryOutput, ServerRevoke, ServerRevokeDriver, ServerRevokeInput, ServerRevokeOutput, ServerToken, ServerTokenDriver, ServerTokenInput, ServerTokenOutput, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput, Signature, TokenValidityInterval, TokenVerifyStatus, VerifyRequestIntegrityResponse
+    token::{Final, Token}, CheckTokenStatus, ClientDeregister, ClientRegisterInit, ClientRevoke, ClientToken, CycleInit, CycleVerifyStatus, DeregisterStatus, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerCycleDriver, ServerCycleOutput, ServerDeregister, ServerDeregisterDriver, ServerDeregisterInput, ServerDeregisterOutput, ServerProtocolError, ServerRegister, ServerRegistryDriver, ServerRegistryInput, ServerRegistryOutput, ServerRevoke, ServerRevokeDriver, ServerRevokeInput, ServerRevokeOutput, ServerToken, ServerTokenDriver, ServerTokenInput, ServerTokenOutput, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput, TokenValidityInterval, TokenVerifyStatus, VerifyRequestIntegrityResponse
 };
 
 pub struct ServerExecutor<S, K, H, const N: usize>
@@ -199,7 +199,7 @@ where
                         machine.recv(time, Some(ServerTokenInput::RevokeResponse((self.revoke_token)(query))));
                     }
                     ServerTokenOutput::StorageRequest(query) => {
-                        machine.recv(time, Some(ServerTokenInput::StorageResponse(((self.store_token)(query)))));
+                        machine.recv(time, Some(ServerTokenInput::StorageResponse((self.store_token)(query))));
                     }
                     ServerTokenOutput::VerificationRequest(query) => {
                         machine.recv(time, Some(ServerTokenInput::VerifyResponse((self.verify_token)(query))));

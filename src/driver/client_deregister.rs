@@ -1,6 +1,5 @@
 use std::{marker::PhantomData, task::Poll};
 
-use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use uuid::Uuid;
 
 use crate::{
@@ -8,7 +7,7 @@ use crate::{
     ServerDeregister, ServerErrorResponse, protocol::ProtocolKit,
 };
 
-use super::{ClientRevokeOutput, ClientSingleDriver, ClientSingleInput};
+use super::{ClientSingleDriver, ClientSingleInput};
 
 pub struct ClientDeregisterDriver<S, K, H, const N: usize>
 where
@@ -152,7 +151,7 @@ mod tests {
 
     #[test]
     pub fn test_deregister_happy_path() {
-        let setup = BasicSetupDetails::<FauxChain>::new();
+        let _ = BasicSetupDetails::<FauxChain>::new();
 
         let target_id = Uuid::new_v4();
         let (c_pk, c_sk) = FauxChain::generate().unwrap();
