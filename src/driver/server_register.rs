@@ -14,30 +14,7 @@ use super::ServerPollResult;
 /// are deferred to the end of the state machine.
 ///
 ///
-/// # Example
-/// ```
-/// use quath::ServerRegistryDriver;
-/// use quath::core::crypto::specials::{FauxChain, FauxKem};
-/// use sha3::Sha3_256;
-/// use quath::DsaSystem;
-/// use quath::MsSinceEpoch;
-/// 
-///
-///
-/// pub type SvrDriver = ServerRegistryDriver<FauxChain, FauxKem, Sha3_256, 32>;
-///
-/// let (server_pk, server_sk) = FauxChain::generate().unwrap();
-/// let mut driver = SvrDriver::new(server_sk);
-///
-/// driver.recv(MsSinceEpoch(0), None);
-///
-/// while let Some(out) = driver.poll_transmit() {
-///     /* handle the output */
-/// }
-///
-/// let result = driver.poll_result();
-///
-/// ```
+
 pub struct ServerRegistryDriver<S, K, H, const N: usize>
 where
     S: DsaSystem,
@@ -220,13 +197,13 @@ where
                 }));
 
             // Wait for the service to respond.
-            return Ok(Some(DriverState::PerformRegistryVerification {
+            Ok(Some(DriverState::PerformRegistryVerification {
                 request: client,
-            }));
+            }))
         }
         _ => {
             /* Nothig */
-            return Ok(None);
+            Ok(None)
         }
     }
 }
@@ -264,7 +241,7 @@ where
 
                 // inner.buffer.enqueue(ServerRegistryOutput::RegistryResponse(req));
                 inner.buffer.enqueue(ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { client_id: request.body.identifier, public_key: (*request.body.public_key).clone(), time: current_time }));
-                return Ok(Some(DriverState::WaitingForStore(Some(req))));
+                Ok(Some(DriverState::WaitingForStore(Some(req))))
             }
         },
         _ => Ok(None), // nothing

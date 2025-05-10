@@ -167,7 +167,7 @@ where
                 claimant: req.claimant,
             }));
             // Switch into waiting state.
-            return Ok(Some(DriverState::WaitingForPublicKeyFetch(Some(req))));
+            Ok(Some(DriverState::WaitingForPublicKeyFetch(Some(req))))
         }
         _ => Ok(None), // ignore all other requests.
     }
@@ -204,7 +204,7 @@ where
             // send out the revocation request
             inner.buffer.enqueue(ServerRevokeOutput::Revoke(RevokeTokenQuery {
                 client_id: request.target,
-                token_hash: (*request.token_hash).clone(),
+                token_hash: (*request.token_hash),
             }));
 
             let request = ProtocolKit::<S, K, H, N>::server_revoke(

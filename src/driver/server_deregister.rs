@@ -171,7 +171,7 @@ where
             // Fetches
             inner.buffer.enqueue(ServerDeregisterOutput::GetPublicKey(GetPublicKeyQuery {target: request.target,
                 claimant: request.claimant,}));
-            return Ok(Some(DriverState::WaitingForPublicKeyFetch(Some(request))));
+            Ok(Some(DriverState::WaitingForPublicKeyFetch(Some(request))))
         }
         _ => Ok(None), // ignore all other requests.
     }

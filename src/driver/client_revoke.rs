@@ -167,7 +167,7 @@ where
 {
 
     let request= ProtocolKit::<S, K, H, N>::client_revoke_init(
-        inner.token_hash.clone(),
+        inner.token_hash,
         inner.target,
         inner.claimant_id,
         &inner.claimant_sk

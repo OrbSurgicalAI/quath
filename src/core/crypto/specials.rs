@@ -1,12 +1,16 @@
-use std::borrow::Cow;
 
-use rand::Rng;
+#[cfg(test)]
+pub use testing::*;
 
-use super::{DsaSystem, FixedByteRepr, KemAlgorithm, Parse, PrivateKey, PublicKey, Signature, ViewBytes};
+#[cfg(test)]
+mod testing {
+    use std::borrow::Cow;
 
+    use rand::Rng;
 
+    use super::super::{DsaSystem, FixedByteRepr, KemAlgorithm, Parse, PrivateKey, PublicKey, Signature, ViewBytes};
 
-#[derive(Clone)]
+    #[derive(Clone)]
 pub struct FauxPrivate {
     random: u64
 }
@@ -192,7 +196,7 @@ impl KemAlgorithm for FauxKem {
     fn encapsulate(encap_key: &Self::EncapsulationKey) -> Result<(Self::CipherText, Self::SharedSecret), Self::Error> {
         let shared = encap_key.secret[0..32].try_into().unwrap();
         Ok((
-            FauxCipherText { encrypted: encap_key.secret.clone() },
+            FauxCipherText { encrypted: encap_key.secret },
             FauxSharedSecret(shared ),
         ))
     }
@@ -203,3 +207,5 @@ impl KemAlgorithm for FauxKem {
     }
 }
 
+
+}

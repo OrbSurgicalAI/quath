@@ -16,8 +16,7 @@ use crate::core::crypto::{
 ///
 /// It is driven with three methods:
 ///
-/// - [ClientDriver::recv] which receives [ClientInput] and updates the state based
-/// on that.
+/// - [ClientDriver::recv] which receives [ClientInput] and updates the state based on that.
 /// - [ClientDriver::poll_transmit] which gets all the messages that must be properly handled.
 /// - [ClientDriver::poll_token] which gets the token (if it is ready).
 ///
@@ -249,8 +248,8 @@ where
         } => handle_client_cycle_pending(
             &mut obj.inner,
             &packet,
-            &pending_private,
-            &pending_public,
+            pending_private,
+            pending_public,
         )?,
     };
 
@@ -327,9 +326,9 @@ where
         }
         ClientInput::TokenResponseSuccess(response) => {
             let dd = ProtocolKit::<S, K, H, HS>::client_token_finish(
-                &response,
-                &token,
-                &dk,
+                response,
+                token,
+                dk,
                 &driver.server_public,
             )?;
             let expiry = response.body.expiry;
@@ -403,7 +402,7 @@ where
             ProtocolKit::<S, K, H, HS>::client_cycle_finish(
                 success,
                 driver.id,
-                &pending_public,
+                pending_public,
                 &driver.server_public,
             )?;
             driver.private = pending_private.clone();

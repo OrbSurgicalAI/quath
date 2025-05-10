@@ -160,7 +160,7 @@ where
         DriverState::WaitingForRequestVerification {
             request,
             token_hash,
-        } => handle_verification(&mut obj.inner, packet, &request, current_time, token_hash)?,
+        } => handle_verification(&mut obj.inner, packet, request, current_time, token_hash)?,
         DriverState::WaitingForStore(resp) => handle_storage_wait(&mut obj.inner, packet, resp)?,
         DriverState::WaitingForRevocation => handle_revocation_wait(&mut obj.inner, packet)?,
         _ => None, // The other states do not have any active behaviour.
@@ -199,16 +199,16 @@ where
                 .buffer
                 .enqueue(ServerTokenOutput::VerificationRequest(VerifyTokenQuery {
                     client_id: request.body.token.id,
-                    token_hash: tok_hash.clone(),
+                    token_hash: tok_hash,
                 }));
-            return Ok(Some(DriverState::WaitingForRequestVerification {
+            Ok(Some(DriverState::WaitingForRequestVerification {
                 request,
                 token_hash: tok_hash,
-            }));
+            }))
         }
         _ => {
             /* Nothig */
-            return Ok(None);
+            Ok(None)
         }
     }
 }
@@ -241,9 +241,9 @@ where
                     .buffer
                     .enqueue(ServerTokenOutput::Revoke(RevokeTokenQuery {
                         client_id: init_msg.body.token.id,
-                        token_hash: token_hash.clone(),
+                        token_hash: *token_hash,
                     }));
-                return Ok(Some(DriverState::WaitingForRevocation));
+                Ok(Some(DriverState::WaitingForRevocation))
             }
             TokenVerifyStatus::Success {
                 client_id,
@@ -273,12 +273,12 @@ where
                     }));
 
                 // Make the state machine wait.
-                return Ok(Some(DriverState::WaitingForStore(Some(response))));
+                Ok(Some(DriverState::WaitingForStore(Some(response))))
             }
         },
         _ => {
             /* Nothig */
-            return Ok(None);
+            Ok(None)
         }
     }
 }
@@ -303,13 +303,13 @@ where
             StorageStatus::Success => {
                 // The storage was succesful, so the server has the token.
                 inner.terminated = true;
-                return Ok(Some(DriverState::Finished(resp.take())));
+                Ok(Some(DriverState::Finished(resp.take())))
             }
             StorageStatus::Failure(reason) => Err(ServerProtocolError::StoreFailure(reason)),
         },
         _ => {
             /* Nothig */
-            return Ok(None);
+            Ok(None)
         }
     }
 }
@@ -333,7 +333,7 @@ where
         ServerTokenInput::RevokeResponse(_) => Err(ServerProtocolError::TokenDuplicate),
         _ => {
             /* Nothig */
-            return Ok(None);
+            Ok(None)
         }
     }
 }

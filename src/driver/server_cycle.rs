@@ -13,30 +13,7 @@ use super::ServerPollResult;
 /// [ServerCycleDriver::poll_result] method, which will return a result.
 ///
 ///
-/// # Example
-/// ```
-/// use quath::ServerCycleDriver;
-/// use quath::core::crypto::specials::{FauxChain, FauxKem};
-/// use sha3::Sha3_256;
-/// use quath::DsaSystem;
-/// use quath::MsSinceEpoch;
-/// 
-///
-///
-/// pub type SvrDriver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, 32>;
-///
-/// let (server_pk, server_sk) = FauxChain::generate().unwrap();
-/// let mut driver = SvrDriver::new(server_sk);
-///
-/// driver.recv(MsSinceEpoch(0), None);
-///
-/// while let Some(out) = driver.poll_transmit() {
-///     /* handle the output */
-/// }
-///
-/// let result = driver.poll_result();
-///
-/// ```
+
 pub struct ServerCycleDriver<S, K, H, const N: usize>
 where
     S: DsaSystem,
@@ -181,7 +158,7 @@ where
 {
     let state = match &mut obj.state {
         DriverState::Init => handle_registry_init(&mut obj.inner, packet)?,
-       DriverState::WaitingForRequestVerification(inner) => handle_verification(&mut obj.inner, packet, &inner, current_time)?,
+       DriverState::WaitingForRequestVerification(inner) => handle_verification(&mut obj.inner, packet, inner, current_time)?,
        DriverState::ServerStore(inner) => handle_store_wait(&mut obj.inner, packet, inner)?,
         DriverState::Errored(_) => None,
         DriverState::Finished(_) => None,
@@ -216,11 +193,11 @@ where
             // Send out a verification request, this will also fetch the new key from the database with
             // which we can actually validate the request.
             inner.buffer.enqueue(ServerCycleOutput::VerificationRequest(CycleVerifyQuery { client_id: request.body.identifier, new_public_key: (*request.body.new_public_key).clone() }));
-            return Ok(Some(DriverState::WaitingForRequestVerification(request)));
+            Ok(Some(DriverState::WaitingForRequestVerification(request)))
         }
         _ => {
             /* Nothig */
-            return Ok(None);
+            Ok(None)
         }
     }
 }
@@ -249,13 +226,13 @@ where
             CycleVerifyStatus::Success { client_id, original_public_key, new_public_key } => {
                 // Verify the request and then issue a store operation.
                 let response = ProtocolKit::<S, K, H, HS>::server_cycle(init_msg, &original_public_key, &inner.server_sk)?;
-                inner.buffer.enqueue(ServerCycleOutput::StorageRequest(StoreRegistryQuery { client_id: client_id, public_key: new_public_key, time: current_time }));
+                inner.buffer.enqueue(ServerCycleOutput::StorageRequest(StoreRegistryQuery { client_id, public_key: new_public_key, time: current_time }));
                 Ok(Some(DriverState::ServerStore(Some(response))))
             }
         }
         _ => {
             /* Nothig */
-            return Ok(None);
+            Ok(None)
         }
     }
 }
@@ -282,7 +259,7 @@ where
             StorageStatus::Success => {
                 // We have succesfully completed the operation.
                 inner.terminated = true;
-                return Ok(Some(DriverState::Finished(resp.take())))
+                Ok(Some(DriverState::Finished(resp.take())))
             },
             StorageStatus::Failure(error) => {
                 Err(ServerProtocolError::StoreFailure(error))
@@ -290,7 +267,7 @@ where
         }
         _ => {
             /* Nothig */
-            return Ok(None);
+            Ok(None)
         }
     }
 }

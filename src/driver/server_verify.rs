@@ -155,7 +155,7 @@ where
             // We have received a request, we now broadcast a request to the server.
             inner.buffer.enqueue(ServerVerifyOutput::CheckToken(CheckTokenQuery {
                 client_id: token.id,
-                array: token.permissions.clone(),
+                array: token.permissions,
                 token_hash: H::hash(&token.view()),
             }));
 

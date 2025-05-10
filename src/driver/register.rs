@@ -11,8 +11,7 @@ use crate::core::crypto::{
 /// 
 /// It is driven with three methods:
 ///
-/// - [RegistryDriver::recv] which receives [RegistryInput] and updates the state based
-/// on that.
+/// - [RegistryDriver::recv] which receives [RegistryInput] and updates the state based on that.
 /// - [RegistryDriver::poll_transmit] which gets all the messages that must be properly handled.
 /// - [RegistryDriver::poll_completion] which gets the token (if it is ready).
 ///
@@ -20,43 +19,6 @@ use crate::core::crypto::{
 /// this is not what you are looking for. This is the raw protocol driver, and is a stateful
 /// wrapper built on [ProtocolKit]. For information on how the protocol works, it is best to refer
 /// to the [ProtocolKit] documentation.
-/// 
-/// # Example
-/// ```
-/// use quath::RegistryDriver;
-/// use quath::algos::fips204::MlDsa44;
-/// use quath::algos::fips203::MlKem512;
-/// use sha3::Sha3_256;
-/// use quath::core::crypto::DsaSystem;
-/// use uuid::Uuid;
-/// use quath::ProtocolSpec;
-/// use quath::core::crypto::MsSinceEpoch;
-/// use quath::core::crypto::specials::FauxChain;
-/// use quath::core::crypto::specials::FauxKem;
-/// 
-/// 
-/// 
-/// let (client_pk, client_sk) = FauxChain::generate().unwrap();
-/// let (server_pk, server_sk) = FauxChain::generate().unwrap();
-/// let (admin_pk, admin_sk) = FauxChain::generate().unwrap();
-/// 
-/// let admin_id = Uuid::new_v4();
-/// let client_id = Uuid::new_v4();
-/// 
-/// let mut driver = RegistryDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(admin_id, admin_sk, client_id, server_pk);
-/// 
-/// // In a real example this would be driven differently.
-/// for i in 0..1 {
-///     /* Here you would pass in the inptus */
-///     driver.recv(None).unwrap();
-/// 
-///     while let Some(transmit) = driver.poll_transmit() {
-///         /* send out the packet */    
-///     }
-/// 
-///     let details = driver.poll_completion();
-/// }
-/// ```
 pub struct RegistryDriver<S, K, H, const HS: usize>
 where
     S: DsaSystem,
@@ -132,7 +94,7 @@ where
             inner: RegistryDriverInner {
                 admin_id: id,
                 admin_private: Some(private),
-                client_id: client_id,
+                client_id,
                 server_public,
                 buffer: ConstGenericRingBuffer::default(),
                 _k: PhantomData,
@@ -190,7 +152,7 @@ where
 
     let state = match &obj.state {
         DriverState::Init => handle_registry_init(&mut obj.inner)?,
-        DriverState::Registering { pending_private } => handle_registry_pending(&mut obj.inner, &packet, &pending_private)?,
+        DriverState::Registering { pending_private } => handle_registry_pending(&mut obj.inner, packet, pending_private)?,
         DriverState::Ready(_) => { /* nothing */ None },
         DriverState::Vacated => { /* nothing */ None }
     };
