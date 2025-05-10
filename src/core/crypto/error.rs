@@ -44,7 +44,9 @@ pub enum ServerProtocolError {
     TokenPermissionError,
     #[error("Failed to verify token revocation request")]
     FailedToVerifyRevocationRequest,
-    #[error("Failed to verify the signature on the hash sent for authenticating the deregistering request.")]
+    #[error(
+        "Failed to verify the signature on the hash sent for authenticating the deregistering request."
+    )]
     FailedToVerifyDeregisterHash,
     #[error("The request to revoke a token was unauthorized.")]
     UnauthorizedTokenRequest,
@@ -59,7 +61,7 @@ pub enum ServerProtocolError {
     #[error("Deregistration target not found.")]
     DeregstrationUnchanged,
     #[error("error in deregisterd")]
-    DeregistrationError(String)
+    DeregistrationError(String),
 }
 impl ServerProtocolError {
     pub fn error_name(&self) -> &'static str {
@@ -92,11 +94,10 @@ impl ServerProtocolError {
             Self::DeregistrationClaimantNotFound => "DeregistrationClaimantNotFound",
             Self::UnauthorizedDeregisterRequest => "UnauthorizedDeregisterRequest",
             Self::DeregstrationUnchanged => "DeregstrationUnchanged",
-            Self::DeregistrationError(_) => "DeregistrationError"
+            Self::DeregistrationError(_) => "DeregistrationError",
         }
     }
 }
-
 
 #[derive(thiserror::Error, Debug)]
 pub enum ClientProtocolError {
@@ -122,7 +123,9 @@ pub enum ClientProtocolError {
     InauthenticRegisterResponse,
     #[error("Failed to verify the hash returned by the server on the cycle response.")]
     FailedToVerifyCycleHash,
-    #[error("Failed to verify the approval hash, as in, the exact hash was not reconstructed on the client end.")]
+    #[error(
+        "Failed to verify the approval hash, as in, the exact hash was not reconstructed on the client end."
+    )]
     FailedToReconstructApprovalHash,
     #[error("Server protocol failure.")]
     ServerError(#[from] ServerProtocolError),
@@ -132,15 +135,15 @@ pub enum ClientProtocolError {
     FailedToValidateRevocationHash,
     #[error("Failed to authenticate revocation response.")]
     FailedToAuthenticateRevocationResponse,
-    #[error("The server sent back a deregistration hash, but it did not correspond to the calculated hash on the client end.")]
+    #[error(
+        "The server sent back a deregistration hash, but it did not correspond to the calculated hash on the client end."
+    )]
     FailedToVerifyDeregisterHash,
     #[error("Failed to authenticate server response for the deregister message.")]
     FailedToAuthenticateDeregisterResponse,
     #[error("Server error response")]
-    ServerErrorResponse(ServerErrorResponse)
+    ServerErrorResponse(ServerErrorResponse),
 }
-
-
 
 impl From<ServerProtocolError> for String {
     fn from(value: ServerProtocolError) -> Self {
@@ -153,5 +156,3 @@ impl From<ClientProtocolError> for String {
         value.to_string()
     }
 }
-
-

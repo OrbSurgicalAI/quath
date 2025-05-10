@@ -1,16 +1,15 @@
 use std::{borrow::Cow, fmt::Display};
 
-pub mod protocol;
-pub mod token;
-pub mod specials;
+mod error;
 pub mod mem;
 pub mod opcode;
-mod error;
+pub mod protocol;
 mod simple;
+pub mod specials;
 mod time;
+pub mod token;
 
 pub mod data;
-
 
 use crate::algos::parse_into_fixed_length;
 pub use crate::core::crypto::data::*;
@@ -18,16 +17,11 @@ pub use error::*;
 pub use simple::*;
 pub use time::*;
 
-
 pub trait Signature: ViewBytes + for<'a> Parse<'a> + Clone {}
-
 
 pub trait FixedByteRepr<const N: usize> {
     fn to_fixed_repr(&self) -> [u8; N];
 }
-
-
-
 
 /// The [PrivateKey] trait specifies how a [PrivateKey] compatible with this protocol
 /// should be implemented. This alows for the protocol to operate over a wide range
@@ -39,8 +33,7 @@ pub trait PrivateKey: Clone {
     fn sign_bytes(&self, sequence: &[u8]) -> Result<Self::Signature, Self::Error>;
 }
 
-pub trait PublicKey: ViewBytes + for<'a> Parse<'a> + Clone
-{
+pub trait PublicKey: ViewBytes + for<'a> Parse<'a> + Clone {
     type Signature;
 
     /// Verifies a message was signed by the corresponding key.
@@ -55,8 +48,6 @@ pub trait DsaSystem {
 
     fn generate() -> Result<(Self::Public, Self::Private), Self::GenError>;
 }
-
-
 
 pub trait HashingAlgorithm<const N: usize> {
     fn hash(buffer: &[u8]) -> [u8; N] {
@@ -73,11 +64,14 @@ pub trait KemAlgorithm {
     type Error;
 
     fn generate() -> Result<(Self::DecapsulationKey, Self::EncapsulationKey), Self::Error>;
-    fn encapsulate(encap_key: &Self::EncapsulationKey) -> Result<(Self::CipherText, Self::SharedSecret), Self::Error>;
-    fn decapsulate(decap_key: &Self::DecapsulationKey, cipher: &Self::CipherText) -> Result<Self::SharedSecret, Self::Error>;
+    fn encapsulate(
+        encap_key: &Self::EncapsulationKey,
+    ) -> Result<(Self::CipherText, Self::SharedSecret), Self::Error>;
+    fn decapsulate(
+        decap_key: &Self::DecapsulationKey,
+        cipher: &Self::CipherText,
+    ) -> Result<Self::SharedSecret, Self::Error>;
 }
-
-
 
 pub trait Parse<'a>: Sized {
     type Error: Display;
@@ -97,11 +91,8 @@ impl<'a, const N: usize> Parse<'a> for [u8; N] {
 /// and thus we allow returning a [Cow] in order to
 /// return owned values.
 pub trait ViewBytes {
-    
     fn view(&self) -> Cow<'_, [u8]>;
 }
-
-
 
 impl<const N: usize> ViewBytes for [u8; N] {
     fn view(&self) -> Cow<'_, [u8]> {
@@ -109,9 +100,4 @@ impl<const N: usize> ViewBytes for [u8; N] {
     }
 }
 
-impl<const N: usize> Signature for [u8; N] {
-   
-}
-
-
-
+impl<const N: usize> Signature for [u8; N] {}

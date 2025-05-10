@@ -1,6 +1,5 @@
-use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Digest};
 use crate::core::crypto::HashingAlgorithm;
-
+use sha3::{Digest, Sha3_224, Sha3_256, Sha3_384, Sha3_512};
 
 macro_rules! impl_hashing_fn {
     ( $($name:ident, $size:expr),* ) => {
@@ -17,22 +16,11 @@ macro_rules! impl_hashing_fn {
             }
 
         )*
-        
+
     }
 }
 
-
-impl_hashing_fn!(
-    Sha3_224, 28,
-    Sha3_256, 32,
-    Sha3_384, 48,
-    Sha3_512, 64
-);
-
-
-
-
-
+impl_hashing_fn!(Sha3_224, 28, Sha3_256, 32, Sha3_384, 48, Sha3_512, 64);
 
 // impl HashingAlgorithm for Sha3_384 {
 //     type HashResult = [u8; 48];
@@ -78,10 +66,6 @@ impl_hashing_fn!(
 
 // }
 
-
-
-
-
 // impl HashingAlgorithm for Sha3_512 {
 //     type HashResult = [u8; 64];
 
@@ -92,4 +76,3 @@ impl_hashing_fn!(
 //     }
 
 // }
-

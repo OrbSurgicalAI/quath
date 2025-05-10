@@ -10,8 +10,6 @@ pub enum OpCode {
     Stamped,
 }
 
-
-
 impl OpCode {
     pub fn to_code(&self) -> u8 {
         match self {
@@ -45,7 +43,7 @@ impl TryFrom<u8> for OpCode {
             3 => Self::CycleOk,
             4 => Self::Stamp,
             5 => Self::Stamped,
-            x => Err(OpcodeParseError::OutOfRange(x))?
+            x => Err(OpcodeParseError::OutOfRange(x))?,
         })
     }
 }
@@ -72,12 +70,10 @@ impl TryFrom<&str> for OpCode {
     }
 }
 
-
 #[derive(thiserror::Error, Debug)]
 pub enum OpcodeParseError {
     #[error("Failed to decode the opcode as an integer.")]
     OutOfRange(u8),
     #[error("Failed to parse the opcode from a string.")]
-    UnrecognizedLiteral
-
+    UnrecognizedLiteral,
 }

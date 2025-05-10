@@ -1,32 +1,39 @@
 use uuid::Uuid;
 
-use crate::{core::crypto::{mem::B64, opcode::OpCode, token::{Pending, Token}, KemAlgorithm, MsSinceEpoch, PublicKey, Signature, ViewBytes}, ServerProtocolError};
+use crate::{
+    ServerProtocolError,
+    core::crypto::{
+        KemAlgorithm, MsSinceEpoch, PublicKey, Signature, ViewBytes,
+        mem::B64,
+        opcode::OpCode,
+        token::{Pending, Token},
+    },
+};
 
-
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ServerToken<const H: usize, K, S>
 where
     K: KemAlgorithm,
-    S: Signature
+    S: Signature,
 {
     pub body: ServerTokenBody<H, K>,
     pub signature: B64<S>,
 }
 
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ServerTokenBody<const H: usize, K>
-where 
-    K: KemAlgorithm
+where
+    K: KemAlgorithm,
 {
     pub code: OpCode,
     pub hash: B64<[u8; H]>,
     pub cipher_text: B64<K::CipherText>,
-    pub expiry: MsSinceEpoch
+    pub expiry: MsSinceEpoch,
 }
 
 impl<const H: usize, K> ServerTokenBody<H, K>
-where 
-    K: KemAlgorithm
+where
+    K: KemAlgorithm,
 {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(const { 1 + H });
@@ -37,7 +44,7 @@ where
     }
 }
 
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClientToken<S, K>
 where
     S: Signature,
@@ -47,17 +54,16 @@ where
     pub signature: B64<S>,
 }
 
-
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClientTokenBody<K: KemAlgorithm> {
     pub code: OpCode,
     pub token: B64<Token<Pending>>,
-    pub ek: B64<K::EncapsulationKey>
+    pub ek: B64<K::EncapsulationKey>,
 }
 
 impl<K> ClientTokenBody<K>
-where 
-    K: KemAlgorithm
+where
+    K: KemAlgorithm,
 {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(75);
@@ -68,12 +74,11 @@ where
     }
 }
 
-
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct ClientRegisterPost<PK>
-where 
-    PK: PublicKey
+where
+    PK: PublicKey,
 {
     pub code: OpCode,
     pub identifier: Uuid,
@@ -96,20 +101,19 @@ where
     }
 }
 
-
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct ClientRegisterInit<PK, S>
 where
     PK: PublicKey,
-    S: Signature
+    S: Signature,
 {
     pub body: ClientRegisterPost<PK>,
     pub k_proof: B64<S>,
-    pub a_proof: B64<S>
+    pub a_proof: B64<S>,
 }
 
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ServerRegister<S, const HASH_SIZE: usize>
 where
     S: Signature,
@@ -118,7 +122,7 @@ where
     pub signature: B64<S>,
 }
 
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct ServerRegisterBody<const H: usize> {
     pub code: OpCode,
@@ -127,7 +131,7 @@ pub struct ServerRegisterBody<const H: usize> {
 
 impl<const H: usize> ServerRegisterBody<H> {
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = vec![ 0u8;  1 + H  ];
+        let mut buffer = vec![0u8; 1 + H];
         buffer.push(self.code.to_code());
         buffer[1..const { 1 + H }].copy_from_slice(&*self.identity_hash);
 
@@ -136,95 +140,90 @@ impl<const H: usize> ServerRegisterBody<H> {
 }
 
 #[derive(Clone)]
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClientDeregister<S, const N: usize>
-where 
-    S: Signature
+where
+    S: Signature,
 {
     pub target: Uuid,
     pub claimant: Uuid,
-    pub proof: B64<S>
+    pub proof: B64<S>,
 }
 
 #[derive(Clone)]
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ServerDeregister<S, const N: usize>
-where 
-    S: Signature
+where
+    S: Signature,
 {
     pub approval: B64<[u8; N]>,
-    pub proof: B64<S>
+    pub proof: B64<S>,
 }
 
-
 #[derive(Clone)]
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClientRevoke<S, const N: usize>
-where 
-    S: Signature
+where
+    S: Signature,
 {
     pub token_hash: B64<[u8; N]>,
     pub target: Uuid,
     pub claimant: Uuid,
-    pub proof: B64<S>
+    pub proof: B64<S>,
 }
 
 #[derive(Clone)]
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ServerRevoke<S, const N: usize>
-where 
-    S: Signature
+where
+    S: Signature,
 {
     pub revoke_hash: B64<[u8; N]>,
-    pub proof: B64<S>
+    pub proof: B64<S>,
 }
 
-
 #[derive(Debug, Clone)]
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ServerErrorResponse
-{
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ServerErrorResponse {
     pub name: &'static str,
-    pub error: String
+    pub error: String,
 }
 
 impl From<ServerProtocolError> for ServerErrorResponse {
     fn from(value: ServerProtocolError) -> Self {
         Self {
             name: value.error_name(),
-            error: value.to_string()
+            error: value.to_string(),
         }
     }
 }
 
 #[derive(Clone)]
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CycleInit<PK, S>
-where 
+where
     S: Signature,
-    PK: PublicKey
+    PK: PublicKey,
 {
     pub body: CycleInitBody<PK>,
     pub new_proof: B64<S>,
-    pub original_proof: B64<S>
+    pub original_proof: B64<S>,
 }
 
 #[derive(Clone)]
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CycleInitBody<PK>
-where 
-    PK: PublicKey
+where
+    PK: PublicKey,
 {
     pub code: OpCode,
     pub identifier: Uuid,
-    pub new_public_key: B64<PK>
+    pub new_public_key: B64<PK>,
 }
 
-
-
 impl<PK> CycleInitBody<PK>
-where   
-    PK: PublicKey
+where
+    PK: PublicKey,
 {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = vec![];
@@ -235,7 +234,7 @@ where
     }
 }
 
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ServerCycle<const H: usize, S>
 where
     S: Signature,
@@ -245,10 +244,10 @@ where
 }
 
 #[derive(Debug, PartialEq, Eq)]
-#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ServerCycleBody<const H: usize> {
     pub code: OpCode,
-    pub hash: B64<[u8; H]>
+    pub hash: B64<[u8; H]>,
 }
 
 impl<const H: usize> ServerCycleBody<H> {

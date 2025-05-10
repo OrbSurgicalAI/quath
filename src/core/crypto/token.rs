@@ -6,7 +6,6 @@ use uuid::Uuid;
 
 use super::{FixedByteRepr, KemAlgorithm, MsSinceEpoch, Parse, ViewBytes};
 
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pending;
 
@@ -22,18 +21,13 @@ pub struct Token<K> {
     pub permissions: BitArray<[u8; 16], Lsb0>,
     pub timestamp: MsSinceEpoch,
     pub body: [u8; 32],
-    pub _state: PhantomData<K>
-
+    pub _state: PhantomData<K>,
 }
 
 const ID_FIELD: Range<usize> = 2..18;
 const PERMISSION_FIELD: Range<usize> = 18..34;
 const TIMESTAMP_FIELD: Range<usize> = 34..42;
 const BODY_FIELD: Range<usize> = 42..74;
-
-
-
-
 
 impl<K> Token<K> {
     pub fn permissions(&self) -> &BitArray<[u8; 16], Lsb0> {
@@ -49,7 +43,6 @@ impl<K> Token<K> {
         buffer[BODY_FIELD].copy_from_slice(&self.body);
         buffer
     }
-
 }
 
 impl<K> ViewBytes for Token<K> {
@@ -68,7 +61,9 @@ impl<'a, K> Parse<'a> for Token<K> {
         let perms: [u8; 16] = value[PERMISSION_FIELD].try_into().unwrap();
 
         let permissions = BitArray::from(perms);
-        let timestamp = MsSinceEpoch(i64::from_le_bytes(value[TIMESTAMP_FIELD].try_into().unwrap()));
+        let timestamp = MsSinceEpoch(i64::from_le_bytes(
+            value[TIMESTAMP_FIELD].try_into().unwrap(),
+        ));
         let body = value[BODY_FIELD].try_into().unwrap();
 
         Ok(Self {
@@ -78,15 +73,12 @@ impl<'a, K> Parse<'a> for Token<K> {
             permissions,
             timestamp,
             body,
-            _state: PhantomData
+            _state: PhantomData,
         })
     }
-
 }
 
-
 impl Token<Pending> {
-
     pub fn new(protocol: u8, sub_protocol: u8, id: Uuid, time: MsSinceEpoch) -> Self {
         Self {
             protocol,
@@ -95,9 +87,8 @@ impl Token<Pending> {
             body: rand::rng().random(),
             id,
             timestamp: time,
-            _state: PhantomData
+            _state: PhantomData,
         }
-
     }
     pub fn permissions_mut(&mut self) -> &mut BitArray<[u8; 16], Lsb0> {
         &mut self.permissions
@@ -112,19 +103,15 @@ impl Token<Pending> {
             body: self.body.clone(),
             permissions: self.permissions,
             _state: PhantomData,
-            timestamp: self.timestamp
+            timestamp: self.timestamp,
         }
     }
 
     pub fn update_with_shared_secret<K>(&self, ss: K::SharedSecret) -> Token<Final>
-    where 
+    where
         K: KemAlgorithm,
-        K::SharedSecret: FixedByteRepr<32>
+        K::SharedSecret: FixedByteRepr<32>,
     {
-
-     
-
-
         Token {
             id: self.id,
             protocol: self.protocol,
@@ -132,19 +119,10 @@ impl Token<Pending> {
             body: ss.to_fixed_repr(),
             permissions: self.permissions,
             _state: PhantomData,
-            timestamp: self.timestamp
+            timestamp: self.timestamp,
         }
-        
-
-        
-
     }
 }
-
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -158,7 +136,6 @@ mod tests {
 
     use super::{Pending, Token};
 
-
     impl<'a> Arbitrary<'a> for Token<Pending> {
         fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
             Ok(Self {
@@ -168,7 +145,7 @@ mod tests {
                 timestamp: MsSinceEpoch(i64::arbitrary(u)?),
                 sub_protocol: u.arbitrary()?,
                 protocol: u.arbitrary()?,
-                _state: PhantomData
+                _state: PhantomData,
             })
         }
     }
@@ -182,22 +159,19 @@ mod tests {
 
         let token: Token<Pending> = Token::parse_bytes(&*token.view()).unwrap();
         assert!(token.permissions().get(0).unwrap());
-
     }
 
     #[test]
     pub fn token_serde() {
-        
         arbtest::arbtest(|u| {
-            
             let manufactured = Token::arbitrary(u)?;
 
             let field = manufactured.view();
             let manufactured_again = Token::parse_bytes(&field as &[u8]).unwrap();
             assert_eq!(manufactured, manufactured_again);
-        
-            
+
             Ok(())
-        }).budget(Duration::from_secs(2));
+        })
+        .budget(Duration::from_secs(2));
     }
 }

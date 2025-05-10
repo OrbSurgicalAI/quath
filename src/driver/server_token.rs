@@ -346,7 +346,11 @@ mod tests {
     use sha3::Sha3_256;
 
     use crate::{
-        protocol::ProtocolKit, specials::{FauxChain, FauxKem}, testutil::BasicSetupDetails, DsaSystem, HashingAlgorithm, StoreTokenQuery, TokenValidityInterval, VerifyTokenQuery, ViewBytes
+        DsaSystem, HashingAlgorithm, StoreTokenQuery, TokenValidityInterval, VerifyTokenQuery,
+        ViewBytes,
+        protocol::ProtocolKit,
+        specials::{FauxChain, FauxKem},
+        testutil::BasicSetupDetails,
     };
 
     use super::{ServerTokenDriver, ServerTokenOutput};
@@ -383,9 +387,8 @@ mod tests {
         );
 
         // Check the verification request.
-        let ServerTokenOutput::VerificationRequest(VerifyTokenQuery {
-            ..
-        }) = driver.poll_transmit().unwrap()
+        let ServerTokenOutput::VerificationRequest(VerifyTokenQuery { .. }) =
+            driver.poll_transmit().unwrap()
         else {
             panic!("Expected verification request, got something else.");
         };
@@ -402,7 +405,6 @@ mod tests {
         );
 
         let ServerTokenOutput::StorageRequest(StoreTokenQuery {
-          
             token_hash: server_token_hash,
             ..
         }) = driver.poll_transmit().unwrap()
@@ -412,7 +414,9 @@ mod tests {
 
         driver.recv(
             crate::MsSinceEpoch(0),
-            Some(super::ServerTokenInput::StorageResponse(crate::StorageStatus::Success)),
+            Some(super::ServerTokenInput::StorageResponse(
+                crate::StorageStatus::Success,
+            )),
         );
 
         let Poll::Ready(Ok(response)) = driver.poll_result() else {
@@ -524,7 +528,9 @@ mod tests {
 
         driver.recv(
             MsSinceEpoch(0),
-            Some(ServerTokenInput::RevokeResponse(crate::TokenRevocationStatus::Confirmed)),
+            Some(ServerTokenInput::RevokeResponse(
+                crate::TokenRevocationStatus::Confirmed,
+            )),
         );
         let Poll::Ready(Err(ServerProtocolError::TokenDuplicate)) = driver.poll_result() else {
             panic!("Expected a duplicate token protocol error");
@@ -622,7 +628,9 @@ mod tests {
 
         driver.recv(
             MsSinceEpoch(0),
-            Some(ServerTokenInput::StorageResponse(crate::StorageStatus::Failure("db down".into()))),
+            Some(ServerTokenInput::StorageResponse(
+                crate::StorageStatus::Failure("db down".into()),
+            )),
         );
 
         let Poll::Ready(Err(ServerProtocolError::StoreFailure(reason))) = driver.poll_result()
@@ -689,7 +697,9 @@ mod tests {
         // Step 5: Simulate receiving confirmation
         driver.recv(
             MsSinceEpoch(0),
-            Some(ServerTokenInput::RevokeResponse(crate::TokenRevocationStatus::Confirmed)),
+            Some(ServerTokenInput::RevokeResponse(
+                crate::TokenRevocationStatus::Confirmed,
+            )),
         );
 
         // Step 6: The result should now be a final protocol error

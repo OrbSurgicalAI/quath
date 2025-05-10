@@ -1,6 +1,5 @@
-
-#[cfg(feature="serde")]
+#[cfg(feature = "serde")]
 pub mod serde;
 
-#[cfg(feature="chrono")]
+#[cfg(feature = "chrono")]
 pub mod chrono;

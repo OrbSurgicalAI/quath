@@ -2,10 +2,7 @@ use std::{marker::PhantomData, task::Poll};
 
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 
-use crate::{
-    ClientProtocolError, ServerErrorResponse,
-};
-
+use crate::{ClientProtocolError, ServerErrorResponse};
 
 pub(crate) struct ClientSingleDriver<C, CO, REQ, RES> {
     inner: ClientSingleDriverInner<C, CO, REQ, RES>,

@@ -4,11 +4,12 @@ use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use uuid::Uuid;
 
 use crate::core::crypto::{
-    protocol::ProtocolKit, ClientProtocolError, ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm, ServerProtocolError, ServerRegister
+    ClientProtocolError, ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm,
+    ServerProtocolError, ServerRegister, protocol::ProtocolKit,
 };
 
 /// Represents the protocol execution for registration in a SANS/IO manner.
-/// 
+///
 /// It is driven with three methods:
 ///
 /// - [RegistryDriver::recv] which receives [RegistryInput] and updates the state based on that.
@@ -29,13 +30,13 @@ where
 }
 
 pub struct RegistryDetails<S>
-where 
-    S: DsaSystem
+where
+    S: DsaSystem,
 {
     pub admin_id: Uuid,
     pub admin_private: S::Private,
     pub client_id: Uuid,
-    pub client_privte: S::Private
+    pub client_privte: S::Private,
 }
 
 enum DriverState<S>
@@ -43,21 +44,23 @@ where
     S: DsaSystem,
 {
     Init,
-    Registering { pending_private: S::Private },
+    Registering {
+        pending_private: S::Private,
+    },
     Ready(Option<RegistryDetails<S>>),
 
     /// This state essentially means the state machine has elapsed, there
     /// is nothing more it can or will do.
-    Vacated
+    Vacated,
 }
 
 pub enum RegistryInput<S, const N: usize>
-where 
-    S: DsaSystem
+where
+    S: DsaSystem,
 {
     UuidNotUnique,
     Response(ServerRegister<S::Signature, N>),
-    RegistryFailure(ServerProtocolError)
+    RegistryFailure(ServerProtocolError),
 }
 
 pub enum RegistryOutput<S>
@@ -75,7 +78,7 @@ where
     admin_id: Uuid,
     admin_private: Option<S::Private>,
     client_id: Uuid,
-    server_public:S::Public ,
+    server_public: S::Public,
     buffer: ConstGenericRingBuffer<RegistryOutput<S>, 2>,
     _k: PhantomData<K>,
     _h: PhantomData<H>,
@@ -110,10 +113,17 @@ where
     /// immediately regenerate the [Uuid] and restart.
     ///
     /// If there is an error, then we will return to the initialization state.
-    pub fn recv(&mut self, packet: Option<RegistryInput<S, HS>>) -> Result<(), ClientProtocolError> {
+    pub fn recv(
+        &mut self,
+        packet: Option<RegistryInput<S, HS>>,
+    ) -> Result<(), ClientProtocolError> {
         // If we are vacated we should not return more stuff.
-        if let DriverState::Vacated = self.state { return Ok(()) };
-        if let DriverState::Ready(_) = self.state { return Ok(() )};
+        if let DriverState::Vacated = self.state {
+            return Ok(());
+        };
+        if let DriverState::Ready(_) = self.state {
+            return Ok(());
+        };
         recv_internal(self, &packet).inspect_err(|_| self.state = DriverState::Init)
     }
 
@@ -129,8 +139,8 @@ where
                 let inner = value.take();
                 self.state = DriverState::Vacated;
                 Poll::Ready(inner.unwrap())
-            },
-            _ => Poll::Pending
+            }
+            _ => Poll::Pending,
         }
     }
 }
@@ -152,9 +162,17 @@ where
 
     let state = match &obj.state {
         DriverState::Init => handle_registry_init(&mut obj.inner)?,
-        DriverState::Registering { pending_private } => handle_registry_pending(&mut obj.inner, packet, pending_private)?,
-        DriverState::Ready(_) => { /* nothing */ None },
-        DriverState::Vacated => { /* nothing */ None }
+        DriverState::Registering { pending_private } => {
+            handle_registry_pending(&mut obj.inner, packet, pending_private)?
+        }
+        DriverState::Ready(_) => {
+            /* nothing */
+            None
+        }
+        DriverState::Vacated => {
+            /* nothing */
+            None
+        }
     };
 
     if let Some(inner) = state {
@@ -180,7 +198,9 @@ where
     )?;
 
     // Enqueue the new rquest.s
-    inner.buffer.enqueue(RegistryOutput::RegisterRequest(request));
+    inner
+        .buffer
+        .enqueue(RegistryOutput::RegisterRequest(request));
 
     Ok(Some(DriverState::Registering {
         pending_private: new_private,
@@ -190,44 +210,41 @@ where
 fn handle_registry_pending<S, K, H, const HS: usize>(
     inner: &mut RegistryDriverInner<S, K, H, HS>,
     packet: &Option<RegistryInput<S, HS>>,
-    pending_private: &S::Private
+    pending_private: &S::Private,
 ) -> Result<Option<DriverState<S>>, ClientProtocolError>
 where
     S: DsaSystem,
     K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
-
     let Some(packet) = packet else {
         return Ok(None);
     };
 
     match packet {
         RegistryInput::Response(response) => {
-            ProtocolKit::<S, K, H, HS>::client_register_finish(response, inner.client_id, &inner.server_public)?;
+            ProtocolKit::<S, K, H, HS>::client_register_finish(
+                response,
+                inner.client_id,
+                &inner.server_public,
+            )?;
 
             return Ok(Some(DriverState::Ready(Some(RegistryDetails {
                 admin_id: inner.admin_id,
                 client_id: inner.client_id,
                 admin_private: inner.admin_private.take().unwrap(),
-                client_privte: pending_private.clone()
+                client_privte: pending_private.clone(),
             }))));
         }
         RegistryInput::RegistryFailure(inner) => {
-
-            return Err(ClientProtocolError::ServerError(inner.clone()))
+            return Err(ClientProtocolError::ServerError(inner.clone()));
             // return Ok(Some(DriverState::Init));
         }
         _ => { /* Nothing !! */ }
     }
 
-    
-
     Ok(None)
 }
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -237,7 +254,14 @@ mod tests {
     use sha3::Sha3_256;
     use uuid::Uuid;
 
-    use crate::{algos::{fips203::MlKem512, fips204::{MlDsa44, MlDsa44Public}}, core::crypto::{protocol::ProtocolKit, DsaSystem, ServerProtocolError}, driver::register::DriverState};
+    use crate::{
+        algos::{
+            fips203::MlKem512,
+            fips204::{MlDsa44, MlDsa44Public},
+        },
+        core::crypto::{DsaSystem, ServerProtocolError, protocol::ProtocolKit},
+        driver::register::DriverState,
+    };
 
     use super::{RegistryDriver, RegistryInput, RegistryOutput};
 
@@ -279,11 +303,8 @@ mod tests {
         for _ in 0..5 {
             setup.driver.recv(None).unwrap();
 
-            while let Some(_) = setup.driver.poll_transmit() {
-                /* send out a packet */
-            }
+            while let Some(_) = setup.driver.poll_transmit() { /* send out a packet */ }
             let _ = setup.driver.poll_completion();
-
         }
     }
 
@@ -316,7 +337,6 @@ mod tests {
         // Ensure it's ready
         match setup.driver.poll_completion() {
             Poll::Ready(details) => {
-       
                 assert_eq!(details.admin_id, setup.admin_id);
                 assert_eq!(details.client_id, setup.client_id);
             }
@@ -351,9 +371,9 @@ mod tests {
         setup.driver.recv(None).unwrap();
 
         // Submit failure
-        let _ = setup
-            .driver
-            .recv(Some(RegistryInput::RegistryFailure(ServerProtocolError::EncapsulationFailed)));
+        let _ = setup.driver.recv(Some(RegistryInput::RegistryFailure(
+            ServerProtocolError::EncapsulationFailed,
+        )));
 
         // Ensure we're back to Init state
         assert!(matches!(setup.driver.state, DriverState::Init));

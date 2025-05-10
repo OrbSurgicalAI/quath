@@ -1,12 +1,7 @@
-
 use fips205::traits::{SerDes, Signer, Verifier};
 use fips205::*;
 
 use crate::algos::parse_into_fixed_length;
-
-
-
-
 
 // impl crate::core::crypto::PrivateKey for fips205::slh_dsa_shake_256f::PrivateKey {
 //     type Signature = [u8; 49856];
@@ -44,25 +39,24 @@ macro_rules! new_pk_cont_ncc_group {
     };
 }
 
-
-
 macro_rules! new_fips205_individual_impl {
     ( $primary:ident, $pk_name:ident, $mod_name:ident ) => {
-
         /// A utility struct representing the digital signature scheme.
-        /// 
+        ///
         /// Contains a single method `generate` which generates a keypair.
         /// ```
         /// use crate::quath::core::crypto::*;
         /// use crate::quath::algos::fips204::MlDsa44;
-        /// 
+        ///
         /// let (pubk, privk) = MlDsa44::generate().unwrap();
         /// ```
         pub struct $primary;
 
-
-        new_pk_cont_ncc_group!($pk_name, { fips205::$mod_name::PK_LEN }, fips205::$mod_name::PublicKey);
-
+        new_pk_cont_ncc_group!(
+            $pk_name,
+            { fips205::$mod_name::PK_LEN },
+            fips205::$mod_name::PublicKey
+        );
 
         impl crate::core::crypto::DsaSystem for $primary {
             type Public = $pk_name;
@@ -100,12 +94,12 @@ macro_rules! new_fips205_individual_impl {
         }
 
         impl crate::core::crypto::PublicKey for $pk_name {
-            type Signature =  [u8; { fips205::$mod_name::SIG_LEN }];
-        
-        
-        
+            type Signature = [u8; { fips205::$mod_name::SIG_LEN }];
+
             fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool {
-                $mod_name::PublicKey::try_from_bytes(&self.0).unwrap().verify(message, signature, &[])
+                $mod_name::PublicKey::try_from_bytes(&self.0)
+                    .unwrap()
+                    .verify(message, signature, &[])
             }
         }
 
@@ -119,37 +113,22 @@ macro_rules! new_fips205_individual_impl {
         //             crate::testutil::test_signing_harness::<crate::algos::fips205::$primary>(&[1,2,3]);
         //         }
 
-                
         //     }
 
-            
-            
         // }
-
-    }
+    };
 }
-
 
 macro_rules! new_fips205_spec {
     (
         $algo:ident, $f_mod_name:ident, $s_mod_name:ident
     ) => {
-
-        
-   
         paste::paste! {
             new_fips205_individual_impl!([<Slh $algo f>], [<Slh $algo f Public>], $f_mod_name);
             new_fips205_individual_impl!([<Slh $algo s>], [<Slh $algo s Public>], $s_mod_name);
         }
-
-        
-
-        
-        
-    }
+    };
 }
-
-
 
 new_fips205_spec! {
     Sha2_128,
@@ -187,12 +166,9 @@ new_fips205_spec! {
     slh_dsa_shake_256s
 }
 
-
-
 // #[cfg(test)]
 // mod tests {
 //     use crate::core::crypto::SigningAlgorithm;
-
 
 //     #[test]
 //     pub fn test_slh_dsa_sha2_256f() {

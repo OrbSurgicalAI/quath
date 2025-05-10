@@ -1,27 +1,20 @@
 use std::{borrow::Cow, fmt::Display};
 
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use chrono::DateTime;
-use serde::{de::Visitor, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Visitor};
 
-use crate::core::crypto::{mem::B64, opcode::OpCode, MsSinceEpoch, Parse, ViewBytes};
-
+use crate::core::crypto::{MsSinceEpoch, Parse, ViewBytes, mem::B64, opcode::OpCode};
 
 // #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 // #[repr(transparent)]
 // struct Cv<V: ToBytes>()
-
 
 #[derive(PartialEq, Eq, Debug)]
 #[repr(transparent)]
 struct InternalB64SerContainer<'a>(Cow<'a, [u8]>);
 
 struct B64Visitor;
-
-
-
-
-
 
 impl<'de> Visitor<'de> for B64Visitor {
     type Value = InternalB64SerContainer<'de>;
@@ -31,34 +24,35 @@ impl<'de> Visitor<'de> for B64Visitor {
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-
+    where
+        E: serde::de::Error,
+    {
         let data = BASE64_STANDARD.decode(v).map_err(|e| E::custom(e))?;
         Ok(InternalB64SerContainer(Cow::Owned(data)))
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-            let data = BASE64_STANDARD.decode(v).map_err(|e| E::custom(e))?;
-            Ok(InternalB64SerContainer(Cow::Owned(data)))
-    }
-
-    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
+    where
+        E: serde::de::Error,
+    {
         let data = BASE64_STANDARD.decode(v).map_err(|e| E::custom(e))?;
         Ok(InternalB64SerContainer(Cow::Owned(data)))
     }
 
- 
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let data = BASE64_STANDARD.decode(v).map_err(|e| E::custom(e))?;
+        Ok(InternalB64SerContainer(Cow::Owned(data)))
+    }
 }
 
 impl Serialize for InternalB64SerContainer<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         if serializer.is_human_readable() {
             BASE64_STANDARD.encode(&self.0).serialize(serializer)
         } else {
@@ -68,62 +62,55 @@ impl Serialize for InternalB64SerContainer<'_> {
 }
 
 impl<'de> Deserialize<'de> for InternalB64SerContainer<'de> {
-    
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>
-        {
-
+    where
+        D: serde::Deserializer<'de>,
+    {
         if deserializer.is_human_readable() {
             let inner = deserializer.deserialize_string(B64Visitor)?;
             Ok(inner)
-                
         } else {
-            Ok(InternalB64SerContainer(Cow::Owned(Vec::deserialize(deserializer)?)))
+            Ok(InternalB64SerContainer(Cow::Owned(Vec::deserialize(
+                deserializer,
+            )?)))
         }
     }
 }
 
 /* B64 Wrapper */
 
-
 impl<T: ViewBytes> Serialize for B64<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         InternalB64SerContainer(self.0.view()).serialize(serializer)
     }
 }
 
-
-
 impl<'de, T> Deserialize<'de> for B64<T>
-where 
+where
     T: ViewBytes,
     for<'a> T: Parse<'a>,
     for<'a> <T as Parse<'a>>::Error: Display,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de> {
+    where
+        D: serde::Deserializer<'de>,
+    {
         let InternalB64SerContainer(inner) = InternalB64SerContainer::deserialize(deserializer)?;
         let wow = T::parse_bytes(&inner).map_err(serde::de::Error::custom)?;
 
         Ok(B64(wow))
-
     }
 }
-
-
-
-
-
 
 /* OPCODE SERDE IMPLEMENTATIONS */
 impl Serialize for OpCode {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         if serializer.is_human_readable() {
             serializer.serialize_str(self.to_static_str())
         } else {
@@ -134,82 +121,90 @@ impl Serialize for OpCode {
 
 struct OpCodeVisitor;
 
-
 impl Visitor<'_> for OpCodeVisitor {
     type Value = OpCode;
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter.write_str("expecting qualified opcode")
     }
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
+    where
+        E: serde::de::Error,
+    {
         OpCode::try_from(v).map_err(E::custom)
     }
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
+    where
+        E: serde::de::Error,
+    {
         OpCode::try_from(&*v).map_err(E::custom)
     }
     fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
+    where
+        E: serde::de::Error,
+    {
         OpCode::try_from(v).map_err(E::custom)
     }
     fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
+    where
+        E: serde::de::Error,
+    {
         self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
     }
     fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
+    where
+        E: serde::de::Error,
+    {
         self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
     }
     fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-                self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
+    where
+        E: serde::de::Error,
+    {
+        self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
     }
     fn visit_u128<E>(self, v: u128) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-                self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
+    where
+        E: serde::de::Error,
+    {
+        self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
     }
     fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-                self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
+    where
+        E: serde::de::Error,
+    {
+        self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
     }
     fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-                self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
+    where
+        E: serde::de::Error,
+    {
+        self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
     }
     fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-                self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
+    where
+        E: serde::de::Error,
+    {
+        self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
     }
     fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-                self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
+    where
+        E: serde::de::Error,
+    {
+        self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
     }
     fn visit_i128<E>(self, v: i128) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
-                self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
+    where
+        E: serde::de::Error,
+    {
+        self.visit_u8(u8::try_from(v).map_err(|_| E::custom("opcodes must fit in 8 bits"))?)
     }
-    
 }
 
 impl<'de> Deserialize<'de> for OpCode {
-    
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>
-        {
-
+    where
+        D: serde::Deserializer<'de>,
+    {
         if deserializer.is_human_readable() {
             deserializer.deserialize_str(OpCodeVisitor)
         } else {
@@ -218,20 +213,21 @@ impl<'de> Deserialize<'de> for OpCode {
     }
 }
 
-
 /* Identifier Serde */
 
 /* Milliseconds Since Epoch */
 impl Serialize for MsSinceEpoch {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         if serializer.is_human_readable() {
-            DateTime::from_timestamp_millis(self.0).unwrap().serialize(serializer)
+            DateTime::from_timestamp_millis(self.0)
+                .unwrap()
+                .serialize(serializer)
         } else {
             serializer.serialize_i64(self.0)
         }
-        
     }
 }
 
@@ -244,8 +240,9 @@ impl Visitor<'_> for MsSinceEpochVisitor {
         formatter.write_str("milliseconds since epoch")
     }
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
+    where
+        E: serde::de::Error,
+    {
         let value = DateTime::parse_from_rfc3339(v).map_err(E::custom)?;
         Ok(MsSinceEpoch(value.timestamp_millis()))
     }
@@ -253,8 +250,9 @@ impl Visitor<'_> for MsSinceEpochVisitor {
 
 impl<'de> Deserialize<'de> for MsSinceEpoch {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de> {
+    where
+        D: serde::Deserializer<'de>,
+    {
         if deserializer.is_human_readable() {
             deserializer.deserialize_str(MsSinceEpochVisitor)
         } else {
@@ -263,44 +261,35 @@ impl<'de> Deserialize<'de> for MsSinceEpoch {
     }
 }
 
-
 // impl<'v, I: Identifier> Visitor<'v, I> for IdVisitor<'v, I> {
-    
 
 // }
-
 
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
 
     use serde::Deserialize;
-    use serde_test::{assert_ser_tokens, assert_tokens, Configure, Token};
+    use serde_test::{Configure, Token, assert_ser_tokens, assert_tokens};
 
-
-    use crate::core::crypto::{mem::B64, opcode::OpCode, MsSinceEpoch, ServerCycleBody};
+    use crate::core::crypto::{MsSinceEpoch, ServerCycleBody, mem::B64, opcode::OpCode};
 
     use super::InternalB64SerContainer;
 
-
-    
-
-
     #[derive(serde::Serialize, Deserialize)]
     pub struct Stub {
-        field: B64<[u8; 3]>
+        field: B64<[u8; 3]>,
     }
 
     #[test]
     pub fn test_string_like() {
         // This test serves as a sanity check that the signatures can
         // actually be encoded as B64 strings.
-        
 
-        
         let result = serde_json::to_string(&Stub {
-            field: B64([1, 2, 3])
-        }).unwrap();
+            field: B64([1, 2, 3]),
+        })
+        .unwrap();
 
         assert_eq!(result, "{\"field\":\"AQID\"}");
 
@@ -308,58 +297,56 @@ mod tests {
         assert_eq!(*result.field, [1, 2, 3]);
     }
 
-  
     #[test]
     pub fn test_serde_internal_b64_container() {
-        assert_tokens(&InternalB64SerContainer(Cow::Borrowed(&[1, 2, 3])).compact(), &[
-            Token::Seq { len: Some(3) },
-            Token::U8(1),
-            Token::U8(2),
-            Token::U8(3),
-            Token::SeqEnd
-        ]);
-        assert_tokens(&InternalB64SerContainer(Cow::Borrowed(&[])).compact(), &[
-            Token::Seq { len: Some(0) },
-            Token::SeqEnd
-        ]);
-        assert_tokens(&InternalB64SerContainer(Cow::Borrowed(&[1, 2, 3])).readable(), &[
-            Token::Str("AQID")
-        ]);
+        assert_tokens(
+            &InternalB64SerContainer(Cow::Borrowed(&[1, 2, 3])).compact(),
+            &[
+                Token::Seq { len: Some(3) },
+                Token::U8(1),
+                Token::U8(2),
+                Token::U8(3),
+                Token::SeqEnd,
+            ],
+        );
+        assert_tokens(
+            &InternalB64SerContainer(Cow::Borrowed(&[])).compact(),
+            &[Token::Seq { len: Some(0) }, Token::SeqEnd],
+        );
+        assert_tokens(
+            &InternalB64SerContainer(Cow::Borrowed(&[1, 2, 3])).readable(),
+            &[Token::Str("AQID")],
+        );
     }
-    
+
     #[test]
     pub fn test_serde_basic() {
-
         let sig = B64([1, 2, 3]);
 
-    
-        assert_tokens(&B64([1, 2, 3]).compact(), &[
-            Token::Seq { len: Some(3) },
-            Token::U8(1),
-            Token::U8(2),
-            Token::U8(3),
-            Token::SeqEnd
-        ]);
+        assert_tokens(
+            &B64([1, 2, 3]).compact(),
+            &[
+                Token::Seq { len: Some(3) },
+                Token::U8(1),
+                Token::U8(2),
+                Token::U8(3),
+                Token::SeqEnd,
+            ],
+        );
 
-        assert_ser_tokens(&sig.readable(), &[
-            Token::Str("AQID")
-        ]);
+        assert_ser_tokens(&sig.readable(), &[Token::Str("AQID")]);
     }
 
     #[test]
     pub fn test_serde_empty() {
-
         let sig = B64([]);
 
-    
-        assert_tokens(&sig.clone().compact(), &[
-            Token::Seq { len: Some(0) },
-            Token::SeqEnd
-        ]);
+        assert_tokens(
+            &sig.clone().compact(),
+            &[Token::Seq { len: Some(0) }, Token::SeqEnd],
+        );
 
-        assert_ser_tokens(&sig.readable(), &[
-            Token::Str("")
-        ]);
+        assert_ser_tokens(&sig.readable(), &[Token::Str("")]);
     }
 
     #[test]
@@ -383,71 +370,74 @@ mod tests {
 
     #[test]
     pub fn test_serde_hash() {
-        assert_tokens(&B64([1, 2, 3]).compact(), &[
-            Token::Seq { len: Some(3) },
-            Token::U8(1),
-            Token::U8(2),
-            Token::U8(3),
-            Token::SeqEnd
-        ]);
-        assert_tokens(&B64([]).compact(), &[
-            Token::Seq { len: Some(0) },
-            Token::SeqEnd
-        ]);
-        assert_tokens(&B64([1, 2, 3]).readable(), &[
-            Token::Str("AQID")
-        ]);
+        assert_tokens(
+            &B64([1, 2, 3]).compact(),
+            &[
+                Token::Seq { len: Some(3) },
+                Token::U8(1),
+                Token::U8(2),
+                Token::U8(3),
+                Token::SeqEnd,
+            ],
+        );
+        assert_tokens(
+            &B64([]).compact(),
+            &[Token::Seq { len: Some(0) }, Token::SeqEnd],
+        );
+        assert_tokens(&B64([1, 2, 3]).readable(), &[Token::Str("AQID")]);
     }
 
     #[test]
     pub fn test_serde_server_cycle_body() {
+        assert_tokens(
+            &ServerCycleBody {
+                code: OpCode::Register,
+                hash: B64([1, 2, 3]),
+            }
+            .readable(),
+            &[
+                Token::Struct {
+                    name: "ServerCycleBody",
+                    len: 2,
+                },
+                Token::Str("code"),
+                Token::Str("Register"),
+                Token::Str("hash"),
+                Token::Str("AQID"),
+                Token::StructEnd,
+            ],
+        );
 
-      
-
-        assert_tokens(&ServerCycleBody {
-            code: OpCode::Register,
-            hash: B64([1, 2, 3])
-        }.readable(), &[
-            Token::Struct { name: "ServerCycleBody", len: 2},
-            Token::Str("code"),
-            Token::Str("Register"),
-            Token::Str("hash"),
-            Token::Str("AQID"),
-            Token::StructEnd
-        ]);
-
-        assert_tokens(&ServerCycleBody {
-            code: OpCode::Register,
-            hash: B64([1, 2, 3])
-        }.compact(), &[
-            Token::Struct { name: "ServerCycleBody", len: 2},
-            Token::Str("code"),
-            Token::U8(0),
-            Token::Str("hash"),
-            Token::Seq { len: Some(3) },
-            Token::U8(1),
-            Token::U8(2),
-            Token::U8(3),
-            Token::SeqEnd,
-            Token::StructEnd
-        ]);
+        assert_tokens(
+            &ServerCycleBody {
+                code: OpCode::Register,
+                hash: B64([1, 2, 3]),
+            }
+            .compact(),
+            &[
+                Token::Struct {
+                    name: "ServerCycleBody",
+                    len: 2,
+                },
+                Token::Str("code"),
+                Token::U8(0),
+                Token::Str("hash"),
+                Token::Seq { len: Some(3) },
+                Token::U8(1),
+                Token::U8(2),
+                Token::U8(3),
+                Token::SeqEnd,
+                Token::StructEnd,
+            ],
+        );
     }
-
-
-
-
-
-
-  
-
 
     #[test]
     pub fn test_serde_ms_since_epoch() {
-        assert_tokens(&MsSinceEpoch(12).readable(), &[
-            Token::Str("1970-01-01T00:00:00.012Z")
-        ]);
-        assert_tokens(&MsSinceEpoch(12).compact(), &[
-            Token::I64(12)
-        ]);
+        assert_tokens(
+            &MsSinceEpoch(12).readable(),
+            &[Token::Str("1970-01-01T00:00:00.012Z")],
+        );
+        assert_tokens(&MsSinceEpoch(12).compact(), &[Token::I64(12)]);
     }
 }

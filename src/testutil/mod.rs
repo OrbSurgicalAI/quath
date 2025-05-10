@@ -6,17 +6,16 @@ use uuid::Uuid;
 use crate::core::crypto::{DsaSystem, PrivateKey, PublicKey};
 pub const ARBTEST_DURATION: Duration = Duration::from_secs(2);
 
-
 pub struct BasicSetupDetails<S>
-where 
-    S: DsaSystem
+where
+    S: DsaSystem,
 {
     pub client_id: Uuid,
     pub admin_id: Uuid,
     pub admin_pk: S::Public,
     pub admin_sk: S::Private,
     pub server_pk: S::Public,
-    pub server_sk: S::Private
+    pub server_sk: S::Private,
 }
 
 impl<S: DsaSystem> BasicSetupDetails<S> {
@@ -33,33 +32,31 @@ impl<S: DsaSystem> BasicSetupDetails<S> {
             admin_pk,
             admin_sk,
             server_pk,
-            server_sk
+            server_sk,
         }
     }
 }
 
-
 pub fn run_arbtest_harness_simple<S>()
-where 
+where
     S: DsaSystem,
     S::GenError: Debug,
-    <<S as DsaSystem>::Private as crate::core::crypto::PrivateKey>::Error: Debug
+    <<S as DsaSystem>::Private as crate::core::crypto::PrivateKey>::Error: Debug,
 {
     arbtest::arbtest(|u| {
         let wow = Vec::arbitrary(u)?;
         test_signing_harness::<S>(&wow);
 
         Ok(())
-    }).budget(ARBTEST_DURATION);
-    
+    })
+    .budget(ARBTEST_DURATION);
 }
 
 pub fn test_signing_harness<S>(message: &[u8])
-where 
+where
     S: DsaSystem,
-
     S::GenError: Debug,
-    <<S as DsaSystem>::Private as crate::core::crypto::PrivateKey>::Error: Debug
+    <<S as DsaSystem>::Private as crate::core::crypto::PrivateKey>::Error: Debug,
 {
     let (public, private) = S::generate().unwrap();
     let signature = private.sign_bytes(message).unwrap();
@@ -72,20 +69,14 @@ where
 
     assert!(!public.verify(message, &sig2));
     assert!(!public2.verify(message, &signature));
-
-
-   
-
 }
-
-
 
 #[cfg(test)]
 mod tests {
-    use crate::core::crypto::{specials::{FauxChain, FauxKem}, DsaSystem, KemAlgorithm, PrivateKey, PublicKey};
-
-  
-
+    use crate::core::crypto::{
+        DsaSystem, KemAlgorithm, PrivateKey, PublicKey,
+        specials::{FauxChain, FauxKem},
+    };
 
     #[test]
     pub fn test_faux_dsa() {
@@ -95,7 +86,6 @@ mod tests {
         assert!(f_pk.verify(&[1, 2, 3], &sign));
         assert!(!f_pk.verify(&[1, 2], &sign));
         assert!(!f_pk2.verify(&[1, 2, 3], &sign));
-
     }
 
     #[test]

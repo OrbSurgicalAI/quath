@@ -2,9 +2,13 @@ use std::{marker::PhantomData, task::Poll};
 
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 
-use crate::{core::crypto::{
-    protocol::ProtocolKit, ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerProtocolError, ServerRegister
-}, StorageStatus, StoreRegistryQuery, VerifyRequestIntegrityQuery};
+use crate::{
+    StorageStatus, StoreRegistryQuery, VerifyRequestIntegrityQuery,
+    core::crypto::{
+        ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch,
+        ServerProtocolError, ServerRegister, protocol::ProtocolKit,
+    },
+};
 
 use super::ServerPollResult;
 
@@ -48,7 +52,7 @@ where
 {
     ClientRequest(ClientRegisterInit<S::Public, S::Signature>),
     VerificationResponse(VerifyRequestIntegrityResponse<S>),
-    StoreResponse(StorageStatus)
+    StoreResponse(StorageStatus),
 }
 
 pub enum ServerRegistryOutput<S, const N: usize>
@@ -121,9 +125,7 @@ where
     pub fn poll_transmit(&mut self) -> Option<ServerRegistryOutput<S, N>> {
         self.inner.buffer.dequeue()
     }
-    pub fn poll_result(
-        &mut self,
-    ) -> ServerPollResult<ServerRegister<S::Signature, N>> {
+    pub fn poll_result(&mut self) -> ServerPollResult<ServerRegister<S::Signature, N>> {
         match &mut self.state {
             DriverState::Errored(e) => {
                 let value = e.take().unwrap();
@@ -143,7 +145,7 @@ where
 fn recv_internal<S, K, H, const N: usize>(
     obj: &mut ServerRegistryDriver<S, K, H, N>,
     packet: Option<ServerRegistryInput<S>>,
-    current_time: MsSinceEpoch
+    current_time: MsSinceEpoch,
 ) -> Result<(), ServerProtocolError>
 where
     S: DsaSystem,
@@ -190,11 +192,13 @@ where
             // Queue an information request, this will usually be serviced by a database.
             inner
                 .buffer
-                .enqueue(ServerRegistryOutput::VerifyRequestIntegrity(VerifyRequestIntegrityQuery {
-                    requested_id: client.body.identifier,
-                    admin_id: client.body.admin_approval_id,
-                    public_key: (*client.body.public_key).clone(),
-                }));
+                .enqueue(ServerRegistryOutput::VerifyRequestIntegrity(
+                    VerifyRequestIntegrityQuery {
+                        requested_id: client.body.identifier,
+                        admin_id: client.body.admin_approval_id,
+                        public_key: (*client.body.public_key).clone(),
+                    },
+                ));
 
             // Wait for the service to respond.
             Ok(Some(DriverState::PerformRegistryVerification {
@@ -212,7 +216,7 @@ fn handle_server_regiser_wait_lookup<S, K, H, const HS: usize>(
     inner: &mut ServerRegistryDriverInner<S, K, H, HS>,
     packet: Option<ServerRegistryInput<S>>,
     request: &ClientRegisterInit<S::Public, S::Signature>,
-    current_time: MsSinceEpoch
+    current_time: MsSinceEpoch,
 ) -> Result<Option<DriverState<S, HS>>, ServerProtocolError>
 where
     S: DsaSystem,
@@ -240,7 +244,13 @@ where
                 )?;
 
                 // inner.buffer.enqueue(ServerRegistryOutput::RegistryResponse(req));
-                inner.buffer.enqueue(ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { client_id: request.body.identifier, public_key: (*request.body.public_key).clone(), time: current_time }));
+                inner
+                    .buffer
+                    .enqueue(ServerRegistryOutput::StoreRegistry(StoreRegistryQuery {
+                        client_id: request.body.identifier,
+                        public_key: (*request.body.public_key).clone(),
+                        time: current_time,
+                    }));
                 Ok(Some(DriverState::WaitingForStore(Some(req))))
             }
         },
@@ -271,8 +281,8 @@ where
 
                 Ok(Some(DriverState::Finished(Some(response))))
             }
-            StorageStatus::Failure(reason) => Err(ServerProtocolError::StoreFailure(reason))
-        }
+            StorageStatus::Failure(reason) => Err(ServerProtocolError::StoreFailure(reason)),
+        },
         _ => Ok(None), // nothing
     }
 }
@@ -318,7 +328,7 @@ mod tests {
             admin_id,
             admin_sk,
             server_pk,
-            admin_pk
+            admin_pk,
         }
     }
 
@@ -326,19 +336,19 @@ mod tests {
     fn test_driver_happy_path() {
         let mut setup = setup_driver();
 
-        let (request, _) =
-            ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_register_init(
-                setup.client_id,
-                setup.admin_id,
-                &setup.admin_sk,
-            )
-            .unwrap();
+        let (request, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_register_init(
+            setup.client_id,
+            setup.admin_id,
+            &setup.admin_sk,
+        )
+        .unwrap();
 
         let req_pub = request.body.public_key.clone();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
 
         let output = setup
             .driver
@@ -357,15 +367,19 @@ mod tests {
             _ => panic!("Unexpected output"),
         }
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::Success {
                     admin_public: setup.admin_pk.clone(),
                 },
-            )));
+            )),
+        );
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)),
+        );
 
         match setup.driver.poll_result() {
             Poll::Ready(Ok(server_reg)) => {
@@ -391,17 +405,19 @@ mod tests {
         )
         .unwrap();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
 
         let _ = setup.driver.poll_transmit(); // Ignore actual contents
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::UuidNotUnique,
-            )));
+            )),
+        );
 
         match setup.driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::UuidTaken)) => {}
@@ -420,17 +436,19 @@ mod tests {
         )
         .unwrap();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
 
         let _ = setup.driver.poll_transmit();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::PublicKeyNotUnique,
-            )));
+            )),
+        );
 
         match setup.driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::PublicKeyNotUnique)) => {}
@@ -449,17 +467,19 @@ mod tests {
         )
         .unwrap();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
 
         let _ = setup.driver.poll_transmit();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::NoAdminUuid,
-            )));
+            )),
+        );
 
         match setup.driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::NoAdminFound)) => {}
@@ -478,17 +498,19 @@ mod tests {
         )
         .unwrap();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
 
         let _ = setup.driver.poll_transmit();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::Other("failure".into()),
-            )));
+            )),
+        );
 
         match setup.driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::Misc(reason))) => {
@@ -509,22 +531,27 @@ mod tests {
         )
         .unwrap();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
         let _ = setup.driver.poll_transmit();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::Success {
                     admin_public: setup.admin_pk.clone(),
                 },
-            )));
+            )),
+        );
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Failure(
-            "store failed".into(),
-        ))));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::StoreResponse(StorageStatus::Failure(
+                "store failed".into(),
+            ))),
+        );
 
         match setup.driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::StoreFailure(msg))) => {
@@ -545,26 +572,34 @@ mod tests {
         )
         .unwrap();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
         let _ = setup.driver.poll_transmit();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::Success {
                     admin_public: setup.admin_pk.clone(),
                 },
-            )));
+            )),
+        );
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)),
+        );
         let _ = setup.driver.poll_result();
 
         // This should not do anything:
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Failure("ignored".into()))));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::StoreResponse(StorageStatus::Failure(
+                "ignored".into(),
+            ))),
+        );
 
         match setup.driver.poll_result() {
             Poll::Ready(_) => panic!("Should not emit anything after termination"),
@@ -582,25 +617,33 @@ mod tests {
             &setup.admin_sk,
         )
         .unwrap();
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
 
         setup.driver.poll_transmit();
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::Success {
                     admin_public: setup.admin_pk.clone(),
                 },
-            )));
+            )),
+        );
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)),
+        );
 
         assert!(matches!(setup.driver.poll_result(), Poll::Ready(Ok(_))));
 
         // Subsequent success does nothing
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)),
+        );
         assert!(matches!(setup.driver.poll_result(), Poll::Pending));
     }
 
@@ -617,7 +660,10 @@ mod tests {
     fn test_out_of_order_store_success_is_ignored() {
         let mut setup = setup_driver();
         // Should be ignored because state isn't WaitingForStore
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)),
+        );
         assert!(setup.driver.poll_result().is_pending());
     }
 
@@ -631,19 +677,24 @@ mod tests {
             &setup.admin_sk,
         )
         .unwrap();
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
         setup.driver.poll_transmit();
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::Success {
                     admin_public: setup.admin_pk.clone(),
                 },
-            )));
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
+            )),
+        );
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)),
+        );
 
         let result1 = setup.driver.poll_result();
         let result2 = setup.driver.poll_result();
@@ -665,26 +716,31 @@ mod tests {
             &setup.admin_sk,
         )
         .unwrap();
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
         setup.driver.poll_transmit();
 
         // PerformRegistryVerification
         setup.driver.recv(MsSinceEpoch(0), None);
 
-        setup
-            .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
                 VerifyRequestIntegrityResponse::Success {
                     admin_public: setup.admin_pk.clone(),
                 },
-            )));
+            )),
+        );
 
         // WaitingForStore
         setup.driver.recv(MsSinceEpoch(0), None);
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)),
+        );
 
         // Finished
         let _ = setup.driver.poll_result();
@@ -694,44 +750,61 @@ mod tests {
     }
 
     #[test]
-fn test_store_registry_output_after_successful_verification() {
-    let mut setup = setup_driver();
+    fn test_store_registry_output_after_successful_verification() {
+        let mut setup = setup_driver();
 
-    let (request, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_register_init(setup.client_id, setup.admin_id, &setup.admin_sk).unwrap();
+        let (request, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_register_init(
+            setup.client_id,
+            setup.admin_id,
+            &setup.admin_sk,
+        )
+        .unwrap();
 
+        let client_pk = request.body.public_key.deref().clone();
 
-    let client_pk = request.body.public_key.deref().clone();
+        // Send request
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::ClientRequest(request)),
+        );
 
-    // Send request
-    setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::ClientRequest(request)));
-
-    // Clear the VerifyRequestIntegrity output
-    let integrity_check = setup.driver.poll_transmit();
-    match integrity_check {
-        Some(ServerRegistryOutput::VerifyRequestIntegrity(VerifyRequestIntegrityQuery { requested_id, admin_id, .. })) => {
-            assert_eq!(requested_id, setup.client_id);
-            assert_eq!(admin_id, setup.admin_id);
+        // Clear the VerifyRequestIntegrity output
+        let integrity_check = setup.driver.poll_transmit();
+        match integrity_check {
+            Some(ServerRegistryOutput::VerifyRequestIntegrity(VerifyRequestIntegrityQuery {
+                requested_id,
+                admin_id,
+                ..
+            })) => {
+                assert_eq!(requested_id, setup.client_id);
+                assert_eq!(admin_id, setup.admin_id);
+            }
+            _ => panic!("Expected VerifyRequestIntegrity output"),
         }
-        _ => panic!("Expected VerifyRequestIntegrity output"),
-    }
 
-    // Send successful verification response
-    setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::VerificationResponse(
-        VerifyRequestIntegrityResponse::Success {
-            admin_public: setup.admin_pk.clone(),
-        },
-    )));
+        // Send successful verification response
+        setup.driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerRegistryInput::VerificationResponse(
+                VerifyRequestIntegrityResponse::Success {
+                    admin_public: setup.admin_pk.clone(),
+                },
+            )),
+        );
 
-    // Check for StoreRegistry output
-    let output = setup.driver.poll_transmit();
-    match output {
-        Some(ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { client_id, public_key, .. })) => {
-            assert_eq!(client_id, setup.client_id);
-            assert_eq!(public_key.view(), client_pk.view());
-            // assert_eq!(time, setup.time);
+        // Check for StoreRegistry output
+        let output = setup.driver.poll_transmit();
+        match output {
+            Some(ServerRegistryOutput::StoreRegistry(StoreRegistryQuery {
+                client_id,
+                public_key,
+                ..
+            })) => {
+                assert_eq!(client_id, setup.client_id);
+                assert_eq!(public_key.view(), client_pk.view());
+                // assert_eq!(time, setup.time);
+            }
+            _ => panic!("Expected StoreRegistry output"),
         }
-        _ => panic!("Expected StoreRegistry output"),
     }
-}
-
 }

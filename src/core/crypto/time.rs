@@ -20,10 +20,16 @@ impl TokenValidityInterval {
         }
     }
     pub fn from_seconds(backwards: u64, forwards: u64) -> Self {
-        Self::new(Duration::from_secs(backwards), Duration::from_secs(forwards))
+        Self::new(
+            Duration::from_secs(backwards),
+            Duration::from_secs(forwards),
+        )
     }
     pub fn from_milliseconds(backwards: u64, forwards: u64) -> Self {
-        Self::new(Duration::from_millis(backwards), Duration::from_millis(forwards))
+        Self::new(
+            Duration::from_millis(backwards),
+            Duration::from_millis(forwards),
+        )
     }
     pub fn check_time_validity(&self, current: MsSinceEpoch, to_check: MsSinceEpoch) -> bool {
         (-(self.backwards.as_millis() as i128)..(self.forwards.as_millis() as i128 + 1))
@@ -57,13 +63,11 @@ impl AddAssign<Self> for MsSinceEpoch {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::core::crypto::MsSinceEpoch;
 
     use super::TokenValidityInterval;
-
 
     #[test]
     pub fn test_check_time_validity() {

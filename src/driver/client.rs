@@ -11,8 +11,8 @@ use crate::core::crypto::{
 };
 
 /// Represents the protocol execution from the client end in a SANS/IO manner.
-/// 
-/// 
+///
+///
 ///
 /// It is driven with three methods:
 ///
@@ -24,7 +24,7 @@ use crate::core::crypto::{
 /// this is not what you are looking for. This is the raw protocol driver, and is a stateful
 /// wrapper built on [ProtocolKit]. For information on how the protocol works, it is best to refer
 /// to the [ProtocolKit] documentation.
-/// 
+///
 /// # Example
 /// ```
 /// use quath::ClientDriver;
@@ -35,23 +35,23 @@ use crate::core::crypto::{
 /// use uuid::Uuid;
 /// use quath::ProtocolSpec;
 /// use quath::core::crypto::MsSinceEpoch;
-/// 
-/// 
+///
+///
 /// let (client_pk, client_sk) = MlDsa44::generate().unwrap();
 /// let (server_pk, server_sk) = MlDsa44::generate().unwrap();
 /// let mut driver = ClientDriver::<MlDsa44, MlKem512, Sha3_256, 32>::new(Uuid::new_v4(), client_sk, ProtocolSpec::new(0, 0), server_pk);
-/// 
+///
 /// // In a real example this would be driven differently.
 /// for i in 0..5 {
 ///     /* Here you would pass in the inptus */
 ///     driver.recv(MsSinceEpoch(0), None).unwrap();
-/// 
+///
 ///     while let Some(transmit) = driver.poll_transmit() {
 ///         /* send out the packet */    
 ///     }
-/// 
+///
 ///     let token = driver.poll_token(MsSinceEpoch(0));
-/// 
+///
 /// }
 /// ```
 pub struct ClientDriver<S, K, H, const HS: usize>
@@ -192,8 +192,7 @@ where
         time: MsSinceEpoch,
         packet: Option<ClientInput<S, K, HS>>,
     ) -> Result<(), ClientProtocolError> {
-        recv_internal(self, time, packet)
-            .inspect_err(|_| self.state = DriverState::Init)
+        recv_internal(self, time, packet).inspect_err(|_| self.state = DriverState::Init)
     }
     /// This should be polled until it is empty.
     pub fn poll_transmit(&mut self) -> Option<ClientOutput<S, K>> {
@@ -221,12 +220,15 @@ where
     }
 }
 
-fn recv_internal<S, K, H, const HS: usize>(obj: &mut ClientDriver<S, K, H, HS>, time: MsSinceEpoch, packet: Option<ClientInput<S, K, HS>>) -> Result<(), ClientProtocolError>
-where 
+fn recv_internal<S, K, H, const HS: usize>(
+    obj: &mut ClientDriver<S, K, H, HS>,
+    time: MsSinceEpoch,
+    packet: Option<ClientInput<S, K, HS>>,
+) -> Result<(), ClientProtocolError>
+where
     S: DsaSystem,
     K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
-
 {
     if let Some(ClientInput::ServerPublicChange(inner)) = packet {
         obj.inner.server_public = inner;
@@ -245,12 +247,7 @@ where
         DriverState::WaitingOnCycle {
             pending_private,
             pending_public,
-        } => handle_client_cycle_pending(
-            &mut obj.inner,
-            &packet,
-            pending_private,
-            pending_public,
-        )?,
+        } => handle_client_cycle_pending(&mut obj.inner, &packet, pending_private, pending_public)?,
     };
 
     if let Some(inner) = state {
@@ -264,14 +261,13 @@ where
 fn handle_client_init_state<S, K, H, const HS: usize>(
     driver: &mut ClientDriverInner<S, K, H, HS>,
     current_time: MsSinceEpoch,
-    packet: &Option<ClientInput<S, K, HS>>
+    packet: &Option<ClientInput<S, K, HS>>,
 ) -> Result<Option<DriverState<S, K>>, ClientProtocolError>
 where
     S: DsaSystem,
     K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
-
     // If we need a cycle, we should do it. This is sort of a weird edge case
     // but it allows us to approach the state machine in a more natural way.
     if let Some(ClientInput::NeedsCycle) = packet {
@@ -488,10 +484,7 @@ mod tests {
     pub fn test_driver_token_cycle_flow() {
         use crate::{
             algos::{fips203::MlKem512, fips204::MlDsa44},
-            core::crypto::{
-                DsaSystem, MsSinceEpoch, TokenValidityInterval,
-                protocol::ProtocolKit,
-            },
+            core::crypto::{DsaSystem, MsSinceEpoch, TokenValidityInterval, protocol::ProtocolKit},
         };
         use sha3::Sha3_256;
         use std::time::Duration;
@@ -574,15 +567,12 @@ mod tests {
     pub fn test_driver_token_cycle_failure() {
         use crate::{
             algos::{fips203::MlKem512, fips204::MlDsa44},
-            core::crypto::{
-                DsaSystem, MsSinceEpoch,
-            },
+            core::crypto::{DsaSystem, MsSinceEpoch},
         };
         use sha3::Sha3_256;
         use uuid::Uuid;
 
         use super::{ClientDriver, ClientInput, ClientOutput, ProtocolSpec};
-
 
         let (_, client_sk) = MlDsa44::generate().unwrap();
         let (server_pk, _server_sk) = MlDsa44::generate().unwrap();
@@ -684,9 +674,12 @@ mod tests {
         let key_store = driver.poll_transmit();
 
         let cycle_req = driver.poll_transmit();
-        
+
         assert!(matches!(cycle_req.unwrap(), ClientOutput::CycleRequest(_)));
-        assert!(matches!(key_store.unwrap(), ClientOutput::StoreNewCycleKey(_)));
+        assert!(matches!(
+            key_store.unwrap(),
+            ClientOutput::StoreNewCycleKey(_)
+        ));
 
         // Simulate cycle failure
         driver
@@ -775,20 +768,11 @@ mod tests {
 
     type Driver = ClientDriver<MlDsa44, MlKem512, Sha3_256, 32>;
 
-
-
-
-   
-
-
-
     #[test]
     fn test_custom_token_transformer_modifies_token() {
-
         fn permission_encoder(tok: &mut Token<Pending>) {
             tok.permissions_mut().as_mut_bitslice().set(1, true);
         }
-  
 
         let (client_pk, client_sk) = MlDsa44::generate().unwrap();
         let (server_pk, server_sk) = MlDsa44::generate().unwrap();
@@ -813,18 +797,21 @@ mod tests {
             &TokenValidityInterval::new(Duration::from_secs(30), Duration::from_secs(30)),
             MsSinceEpoch(0),
             Duration::from_secs(3),
-        ).unwrap();
+        )
+        .unwrap();
 
-       
-
-        driver.recv(MsSinceEpoch(0), Some(ClientInput::TokenResponseSuccess(response))).unwrap();
+        driver
+            .recv(
+                MsSinceEpoch(0),
+                Some(ClientInput::TokenResponseSuccess(response)),
+            )
+            .unwrap();
 
         match driver.poll_token(MsSinceEpoch(100)) {
             Poll::Ready(token) => {
                 assert!(token.permissions().as_bitslice().get(1).unwrap());
-            },
+            }
             Poll::Pending => panic!("Expected transformed token to be ready"),
         }
     }
-
 }

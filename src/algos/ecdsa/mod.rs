@@ -1,11 +1,13 @@
-use k256::{ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey}, elliptic_curve::{rand_core::OsRng, sec1::EncodedPoint}, Secp256k1};
+use k256::{
+    Secp256k1,
+    ecdsa::{Signature, SigningKey, VerifyingKey, signature::Signer},
+    elliptic_curve::{rand_core::OsRng, sec1::EncodedPoint},
+};
 use rand::seq;
 
 use k256::ecdsa::signature::Verifier;
 
 pub struct K256ECDSA;
-
-
 
 // impl crate::core::crypto::Signature<64> for k256::ecdsa::Signature {
 //     fn view(&self) -> &[u8] {
@@ -22,17 +24,14 @@ pub struct K256ECDSA;
 //     }
 // }
 
-
 #[repr(transparent)]
 pub struct K256Public(EncodedPoint<Secp256k1>);
-
 
 impl crate::core::crypto::PublicKey for K256Public {
     type Signature = Signature;
     fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool {
-        VerifyingKey::from_encoded_point(&self.0).is_ok_and(|f| {
-            f.verify(message, signature).is_ok()
-        })
+        VerifyingKey::from_encoded_point(&self.0)
+            .is_ok_and(|f| f.verify(message, signature).is_ok())
     }
     fn view(&self) -> &[u8] {
         self.0.as_bytes()

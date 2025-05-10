@@ -3,7 +3,9 @@ use std::{marker::PhantomData, task::Poll};
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 
 use crate::{
-    protocol::ProtocolKit, ClientRevoke, DsaSystem, GetPublicKeyQuery, HashingAlgorithm, KemAlgorithm, KeyFetchResponse, KeyFetchResult, RevokeTokenQuery, ServerProtocolError, ServerRevoke, TokenRevocationStatus
+    ClientRevoke, DsaSystem, GetPublicKeyQuery, HashingAlgorithm, KemAlgorithm, KeyFetchResponse,
+    KeyFetchResult, RevokeTokenQuery, ServerProtocolError, ServerRevoke, TokenRevocationStatus,
+    protocol::ProtocolKit,
 };
 
 use super::ServerPollResult;
@@ -54,10 +56,8 @@ where
     Request(ClientRevoke<S::Signature, N>),
 
     KeyFetchResponse(KeyFetchResult<S>),
-    RevokeResponse(TokenRevocationStatus)
+    RevokeResponse(TokenRevocationStatus),
 }
-
-
 
 pub enum ServerRevokeOutput<const N: usize> {
     /// Fetch the public key. We also must report back if this user is an admin
@@ -132,9 +132,9 @@ where
         DriverState::WaitingForPublicKeyFetch(req) => {
             handle_public_key_fetch(&mut obj.inner, packet, req)?
         }
-        DriverState::WaitingForRevocation {
-            request,
-        } => handle_revocation_wait(&mut obj.inner, packet, request)?,
+        DriverState::WaitingForRevocation { request } => {
+            handle_revocation_wait(&mut obj.inner, packet, request)?
+        }
         _ => None, // The other states do not have any active behaviour.
     };
 
@@ -162,10 +162,12 @@ where
     match packet {
         ServerRevokeInput::Request(req) => {
             // Send out a request for the public key.
-            inner.buffer.enqueue(ServerRevokeOutput::GetPublicKey(GetPublicKeyQuery {
-                target: req.claimant,
-                claimant: req.claimant,
-            }));
+            inner
+                .buffer
+                .enqueue(ServerRevokeOutput::GetPublicKey(GetPublicKeyQuery {
+                    target: req.claimant,
+                    claimant: req.claimant,
+                }));
             // Switch into waiting state.
             Ok(Some(DriverState::WaitingForPublicKeyFetch(Some(req))))
         }
@@ -189,38 +191,42 @@ where
 
     match packet {
         ServerRevokeInput::KeyFetchResponse(keyres) => match keyres {
-            KeyFetchResult::Success(KeyFetchResponse { claimant, key, is_admin, has_permissions }) => {
+            KeyFetchResult::Success(KeyFetchResponse {
+                claimant,
+                key,
+                is_admin,
+                has_permissions,
+            }) => {
                 if !is_admin && !has_permissions {
-                // the admin and has permissions.
-                return Err(ServerProtocolError::UnauthorizedTokenRequest);
+                    // the admin and has permissions.
+                    return Err(ServerProtocolError::UnauthorizedTokenRequest);
+                }
+
+                let request = request.take().unwrap();
+
+                if claimant != request.claimant {
+                    return Err(ServerProtocolError::MalformedPkFetch);
+                }
+
+                // send out the revocation request
+                inner
+                    .buffer
+                    .enqueue(ServerRevokeOutput::Revoke(RevokeTokenQuery {
+                        client_id: request.target,
+                        token_hash: (*request.token_hash),
+                    }));
+
+                let request =
+                    ProtocolKit::<S, K, H, N>::server_revoke(&request, &key, &inner.server_sk)?;
+
+                Ok(Some(DriverState::WaitingForRevocation {
+                    request: Some(request),
+                }))
             }
-
-            let request = request.take().unwrap();
-
-            if claimant != request.claimant {
-                return Err(ServerProtocolError::MalformedPkFetch);
-            }
-
-            // send out the revocation request
-            inner.buffer.enqueue(ServerRevokeOutput::Revoke(RevokeTokenQuery {
-                client_id: request.target,
-                token_hash: (*request.token_hash),
-            }));
-
-            let request = ProtocolKit::<S, K, H, N>::server_revoke(
-                &request,
-                &key,
-                &inner.server_sk,
-            )?;
-
-            Ok(Some(DriverState::WaitingForRevocation {
-                request: Some(request)
-            }))
-            },
             KeyFetchResult::InvalidClaimant => Err(ServerProtocolError::InvalidClientUuid),
-            KeyFetchResult::Failure(reason) =>  Err(ServerProtocolError::Misc(reason))
-        }
-        
+            KeyFetchResult::Failure(reason) => Err(ServerProtocolError::Misc(reason)),
+        },
+
         _ => Ok(None), // ignore all other requests.
     }
 }
@@ -228,7 +234,7 @@ where
 fn handle_revocation_wait<S, K, H, const N: usize>(
     inner: &mut ServerRevokeDriverInner<S, K, H, N>,
     packet: Option<ServerRevokeInput<S, N>>,
-    request: &mut Option<ServerRevoke<S::Signature, N>>
+    request: &mut Option<ServerRevoke<S::Signature, N>>,
 ) -> Result<Option<DriverState<S, N>>, ServerProtocolError>
 where
     S: DsaSystem,
@@ -240,10 +246,7 @@ where
     };
 
     match packet {
-        
         ServerRevokeInput::RevokeResponse(_) => {
-            
-
             inner.terminated = true;
 
             Ok(Some(DriverState::Finished(request.take())))
@@ -260,7 +263,10 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        protocol::ProtocolKit, specials::{FauxChain, FauxKem}, testutil::BasicSetupDetails, DsaSystem, GetPublicKeyQuery, KeyFetchResponse, RevokeTokenQuery
+        DsaSystem, GetPublicKeyQuery, KeyFetchResponse, RevokeTokenQuery,
+        protocol::ProtocolKit,
+        specials::{FauxChain, FauxKem},
+        testutil::BasicSetupDetails,
     };
 
     use super::{ServerRevokeDriver, ServerRevokeInput, ServerRevokeOutput};
@@ -283,18 +289,22 @@ mod tests {
         // Send to the driver.
         driver.recv(Some(super::ServerRevokeInput::Request(request)));
 
-        let ServerRevokeOutput::GetPublicKey(GetPublicKeyQuery { target, claimant }) = driver.poll_transmit().unwrap() else {
+        let ServerRevokeOutput::GetPublicKey(GetPublicKeyQuery { target, claimant }) =
+            driver.poll_transmit().unwrap()
+        else {
             panic!("Failed to see a public key fetch.");
         };
         assert_eq!(claimant, target);
 
         // Send the key.
-        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(crate::KeyFetchResult::Success(KeyFetchResponse {
-            claimant: target,
-            key: client_pk,
-            is_admin: true,
-            has_permissions: false,
-        }))));
+        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(
+            crate::KeyFetchResult::Success(KeyFetchResponse {
+                claimant: target,
+                key: client_pk,
+                is_admin: true,
+                has_permissions: false,
+            }),
+        )));
 
         let ServerRevokeOutput::Revoke(RevokeTokenQuery {
             client_id,
@@ -308,7 +318,9 @@ mod tests {
         assert_eq!(token_hash, [0u8; 32]);
 
         // send another
-        driver.recv(Some(ServerRevokeInput::RevokeResponse(crate::TokenRevocationStatus::Confirmed)));
+        driver.recv(Some(ServerRevokeInput::RevokeResponse(
+            crate::TokenRevocationStatus::Confirmed,
+        )));
 
         if let Poll::Ready(Ok(_)) = driver.poll_result() {
         } else {
@@ -331,20 +343,26 @@ mod tests {
 
         driver.recv(Some(ServerRevokeInput::Request(request)));
         driver.poll_transmit(); // consume GetPublicKey
-        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(crate::KeyFetchResult::Success(KeyFetchResponse {
-            claimant: target,
-            key: client_pk,
-            is_admin: true,
-            has_permissions: true,
-        }))));
+        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(
+            crate::KeyFetchResult::Success(KeyFetchResponse {
+                claimant: target,
+                key: client_pk,
+                is_admin: true,
+                has_permissions: true,
+            }),
+        )));
         driver.poll_transmit(); // consume Revoke
-        driver.recv(Some(ServerRevokeInput::RevokeResponse(crate::TokenRevocationStatus::Confirmed)));
+        driver.recv(Some(ServerRevokeInput::RevokeResponse(
+            crate::TokenRevocationStatus::Confirmed,
+        )));
 
         // Already completed. Poll once.
         assert!(matches!(driver.poll_result(), Poll::Ready(Ok(_))));
 
         // Try feeding again — should be ignored silently.
-        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(crate::KeyFetchResult::InvalidClaimant)));
+        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(
+            crate::KeyFetchResult::InvalidClaimant,
+        )));
         assert!(driver.poll_transmit().is_none());
         assert!(matches!(driver.poll_result(), Poll::Pending));
     }
@@ -367,12 +385,14 @@ mod tests {
 
         // Send wrong claimant ID
         let wrong_id = Uuid::new_v4();
-        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(crate::KeyFetchResult::Success(KeyFetchResponse {
-            claimant: wrong_id,
-            key: client_pk,
-            is_admin: true,
-            has_permissions: true,
-        }))));
+        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(
+            crate::KeyFetchResult::Success(KeyFetchResponse {
+                claimant: wrong_id,
+                key: client_pk,
+                is_admin: true,
+                has_permissions: true,
+            }),
+        )));
 
         if let Poll::Ready(Err(e)) = driver.poll_result() {
             match e {
@@ -400,12 +420,14 @@ mod tests {
         driver.recv(Some(ServerRevokeInput::Request(request)));
         driver.poll_transmit(); // consume GetPublicKey
 
-        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(crate::KeyFetchResult::Success(KeyFetchResponse {
-            claimant: target,
-            key: FauxChain::generate().unwrap().0,
-            is_admin: false,
-            has_permissions: false,
-        }))));
+        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(
+            crate::KeyFetchResult::Success(KeyFetchResponse {
+                claimant: target,
+                key: FauxChain::generate().unwrap().0,
+                is_admin: false,
+                has_permissions: false,
+            }),
+        )));
 
         if let Poll::Ready(Err(e)) = driver.poll_result() {
             match e {
@@ -433,7 +455,9 @@ mod tests {
         driver.recv(Some(ServerRevokeInput::Request(request)));
         driver.poll_transmit(); // consume GetPublicKey
 
-        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(crate::KeyFetchResult::InvalidClaimant)));
+        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(
+            crate::KeyFetchResult::InvalidClaimant,
+        )));
 
         if let Poll::Ready(Err(e)) = driver.poll_result() {
             match e {
@@ -462,7 +486,9 @@ mod tests {
         driver.poll_transmit(); // consume GetPublicKey
 
         let reason = "Database timeout".to_string();
-        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(crate::KeyFetchResult::Failure(reason.clone()))));
+        driver.recv(Some(ServerRevokeInput::KeyFetchResponse(
+            crate::KeyFetchResult::Failure(reason.clone()),
+        )));
 
         if let Poll::Ready(Err(e)) = driver.poll_result() {
             match e {

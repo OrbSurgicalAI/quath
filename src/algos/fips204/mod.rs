@@ -1,11 +1,10 @@
-
-use fips204::{traits::{SerDes, Signer, Verifier}, ml_dsa_44::{self}, ml_dsa_65, ml_dsa_87};
+use fips204::{
+    ml_dsa_44::{self},
+    ml_dsa_65, ml_dsa_87,
+    traits::{SerDes, Signer, Verifier},
+};
 
 use crate::algos::parse_into_fixed_length;
-
-
-
-
 
 macro_rules! new_pk_cont_ncc_group {
     (
@@ -35,10 +34,6 @@ macro_rules! new_pk_cont_ncc_group {
     };
 }
 
-
-
-
-
 macro_rules! new_fips204_spec {
     (
         $primary:ident,
@@ -50,12 +45,12 @@ macro_rules! new_fips204_spec {
     ) => {
 
         /// A utility struct representing the digital signature scheme.
-        /// 
+        ///
         /// Contains a single method `generate` which generates a keypair.
         /// ```
         /// use crate::quath::core::crypto::*;
         /// use crate::quath::algos::fips204::MlDsa44;
-        /// 
+        ///
         /// let (pubk, privk) = MlDsa44::generate().unwrap();
         /// ```
         pub struct $primary;
@@ -98,14 +93,14 @@ macro_rules! new_fips204_spec {
                 Ok($pk_name(key.into_bytes()))
             }
         }
-        
-        
+
+
 
         impl crate::core::crypto::PublicKey for $pk_name {
             type Signature =  [u8; { $mod_name::SIG_LEN }];
-        
-        
-        
+
+
+
             fn verify(&self, message: &[u8], signature: &Self::Signature) -> bool {
                 $mod_name::PublicKey::try_from_bytes(self.0).unwrap().verify(message, signature, &[])
             }
@@ -128,22 +123,14 @@ macro_rules! new_fips204_spec {
                 }
             }
 
-            
-            
+
+
         }
 
-       
+
 
     };
 }
-
-
-
-
-
-
-
-
 
 new_fips204_spec! {
     MlDsa44,
@@ -157,16 +144,8 @@ new_fips204_spec! {
     ml_dsa_65
 }
 
-
 new_fips204_spec! {
     MlDsa87,
     MlDsa87Public,
     ml_dsa_87
 }
-
-
-
-
-
-
-

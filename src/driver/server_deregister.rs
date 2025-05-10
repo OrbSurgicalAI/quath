@@ -3,7 +3,9 @@ use std::{marker::PhantomData, task::Poll};
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 
 use crate::{
-    protocol::ProtocolKit, ClientDeregister, DeregisterEntityQuery, DsaSystem, GetPublicKeyQuery, HashingAlgorithm, KemAlgorithm, KeyFetchResponse, KeyFetchResult, ServerDeregister, ServerProtocolError
+    ClientDeregister, DeregisterEntityQuery, DsaSystem, GetPublicKeyQuery, HashingAlgorithm,
+    KemAlgorithm, KeyFetchResponse, KeyFetchResult, ServerDeregister, ServerProtocolError,
+    protocol::ProtocolKit,
 };
 
 use super::ServerPollResult;
@@ -39,13 +41,13 @@ where
     Request(ClientDeregister<S::Signature, N>),
 
     KeyFetchResponse(KeyFetchResult<S>),
-    DeregisterResponse(DeregisterStatus)
+    DeregisterResponse(DeregisterStatus),
 }
 
 pub enum DeregisterStatus {
     Success,
     NotChanged,
-    Fail(String)
+    Fail(String),
 }
 
 pub enum ServerDeregisterOutput {
@@ -169,8 +171,12 @@ where
     match packet {
         ServerDeregisterInput::Request(request) => {
             // Fetches
-            inner.buffer.enqueue(ServerDeregisterOutput::GetPublicKey(GetPublicKeyQuery {target: request.target,
-                claimant: request.claimant,}));
+            inner
+                .buffer
+                .enqueue(ServerDeregisterOutput::GetPublicKey(GetPublicKeyQuery {
+                    target: request.target,
+                    claimant: request.claimant,
+                }));
             Ok(Some(DriverState::WaitingForPublicKeyFetch(Some(request))))
         }
         _ => Ok(None), // ignore all other requests.
@@ -193,7 +199,12 @@ where
 
     match packet {
         ServerDeregisterInput::KeyFetchResponse(keyfetchres) => match keyfetchres {
-            KeyFetchResult::Success(KeyFetchResponse { claimant, key, is_admin, has_permissions }) => {
+            KeyFetchResult::Success(KeyFetchResponse {
+                claimant,
+                key,
+                is_admin,
+                has_permissions,
+            }) => {
                 if !is_admin && !has_permissions {
                     return Err(ServerProtocolError::UnauthorizedDeregisterRequest);
                 }
@@ -207,14 +218,18 @@ where
                 let pro =
                     ProtocolKit::<S, K, H, N>::server_deregister(&request, &key, &inner.server_sk)?;
 
-                inner.buffer.enqueue(ServerDeregisterOutput::Deregister(DeregisterEntityQuery {
-                    target: request.target,
-                }));
+                inner
+                    .buffer
+                    .enqueue(ServerDeregisterOutput::Deregister(DeregisterEntityQuery {
+                        target: request.target,
+                    }));
                 Ok(Some(DriverState::WaitingForDeregister(Some(pro))))
-            },
-            KeyFetchResult::InvalidClaimant => Err(ServerProtocolError::DeregistrationClaimantNotFound),
-            KeyFetchResult::Failure(_) => Err(ServerProtocolError::MalformedPkFetch)
-        }
+            }
+            KeyFetchResult::InvalidClaimant => {
+                Err(ServerProtocolError::DeregistrationClaimantNotFound)
+            }
+            KeyFetchResult::Failure(_) => Err(ServerProtocolError::MalformedPkFetch),
+        },
         _ => Ok(None), // ignore all other requests.
     }
 }
@@ -240,8 +255,8 @@ where
                 Ok(Some(DriverState::Finished(Some(request.take().unwrap()))))
             }
             DeregisterStatus::NotChanged => Err(ServerProtocolError::DeregstrationUnchanged),
-            DeregisterStatus::Fail(reason) => Err(ServerProtocolError::DeregistrationError(reason))
-        }
+            DeregisterStatus::Fail(reason) => Err(ServerProtocolError::DeregistrationError(reason)),
+        },
         _ => Ok(None), // ignore all other requests.
     }
 }
@@ -254,7 +269,11 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        protocol::ProtocolKit, specials::{FauxChain, FauxKem}, testutil::BasicSetupDetails, DsaSystem, GetPublicKeyQuery, KeyFetchResponse, ServerDeregisterDriver, ServerProtocolError
+        DsaSystem, GetPublicKeyQuery, KeyFetchResponse, ServerDeregisterDriver,
+        ServerProtocolError,
+        protocol::ProtocolKit,
+        specials::{FauxChain, FauxKem},
+        testutil::BasicSetupDetails,
     };
 
     use super::{ServerDeregisterInput, ServerDeregisterOutput};
@@ -285,18 +304,22 @@ mod tests {
 
         assert_eq!(target, claimant);
 
-        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(crate::KeyFetchResult::Success(KeyFetchResponse {
-            claimant: target,
-            key: c_pk,
-            is_admin: true,
-            has_permissions: true,
-        }))));
+        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(
+            crate::KeyFetchResult::Success(KeyFetchResponse {
+                claimant: target,
+                key: c_pk,
+                is_admin: true,
+                has_permissions: true,
+            }),
+        )));
 
         let ServerDeregisterOutput::Deregister { .. } = driver.poll_transmit().unwrap() else {
             panic!("Get public key msg.");
         };
 
-        driver.recv(Some(ServerDeregisterInput::DeregisterResponse(crate::DeregisterStatus::Success)));
+        driver.recv(Some(ServerDeregisterInput::DeregisterResponse(
+            crate::DeregisterStatus::Success,
+        )));
 
         match driver.poll_result() {
             Poll::Ready(Ok(inner)) => {
@@ -332,10 +355,14 @@ mod tests {
 
         assert!(matches!(
             driver.poll_transmit(),
-            Some(ServerDeregisterOutput::GetPublicKey(GetPublicKeyQuery { .. }))
+            Some(ServerDeregisterOutput::GetPublicKey(
+                GetPublicKeyQuery { .. }
+            ))
         ));
 
-        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(crate::KeyFetchResult::InvalidClaimant)));
+        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(
+            crate::KeyFetchResult::InvalidClaimant,
+        )));
 
         match driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::DeregistrationClaimantNotFound)) => {}
@@ -369,12 +396,14 @@ mod tests {
         // Pass a mismatched UUID
         let mismatched = Uuid::new_v4();
 
-        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(crate::KeyFetchResult::Success(KeyFetchResponse {
-            claimant: mismatched,
-            key: c_pk,
-            is_admin: true,
-            has_permissions: true,
-        }))));
+        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(
+            crate::KeyFetchResult::Success(KeyFetchResponse {
+                claimant: mismatched,
+                key: c_pk,
+                is_admin: true,
+                has_permissions: true,
+            }),
+        )));
 
         match driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::MalformedPkFetch)) => {}
@@ -402,7 +431,9 @@ mod tests {
 
         assert!(driver.poll_transmit().is_some());
 
-        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(crate::KeyFetchResult::Failure("failed".to_string()))));
+        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(
+            crate::KeyFetchResult::Failure("failed".to_string()),
+        )));
 
         match driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::MalformedPkFetch)) => {}
@@ -430,12 +461,14 @@ mod tests {
 
         driver.poll_transmit();
 
-        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(crate::KeyFetchResult::Success(KeyFetchResponse {
-            claimant: target,
-            key: c_pk,
-            is_admin: false,
-            has_permissions: false,
-        }))));
+        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(
+            crate::KeyFetchResult::Success(KeyFetchResponse {
+                claimant: target,
+                key: c_pk,
+                is_admin: false,
+                has_permissions: false,
+            }),
+        )));
 
         match driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::UnauthorizedDeregisterRequest)) => {}
@@ -463,16 +496,20 @@ mod tests {
 
         driver.poll_transmit();
 
-        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(crate::KeyFetchResult::Success(KeyFetchResponse {
-            claimant: target,
-            key: c_pk,
-            is_admin: true,
-            has_permissions: true,
-        }))));
+        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(
+            crate::KeyFetchResult::Success(KeyFetchResponse {
+                claimant: target,
+                key: c_pk,
+                is_admin: true,
+                has_permissions: true,
+            }),
+        )));
 
         driver.poll_transmit();
 
-        driver.recv(Some(ServerDeregisterInput::DeregisterResponse(super::DeregisterStatus::NotChanged)));
+        driver.recv(Some(ServerDeregisterInput::DeregisterResponse(
+            super::DeregisterStatus::NotChanged,
+        )));
 
         match driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::DeregstrationUnchanged)) => {}
@@ -500,16 +537,20 @@ mod tests {
 
         driver.poll_transmit();
 
-        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(crate::KeyFetchResult::Success(KeyFetchResponse {
-            claimant: target,
-            key: c_pk,
-            is_admin: true,
-            has_permissions: true,
-        }))));
+        driver.recv(Some(ServerDeregisterInput::KeyFetchResponse(
+            crate::KeyFetchResult::Success(KeyFetchResponse {
+                claimant: target,
+                key: c_pk,
+                is_admin: true,
+                has_permissions: true,
+            }),
+        )));
 
         driver.poll_transmit();
 
-        driver.recv(Some(ServerDeregisterInput::DeregisterResponse(super::DeregisterStatus::Fail("db unavailable".to_string()))));
+        driver.recv(Some(ServerDeregisterInput::DeregisterResponse(
+            super::DeregisterStatus::Fail("db unavailable".to_string()),
+        )));
 
         match driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::DeregistrationError(e))) => {

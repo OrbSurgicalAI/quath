@@ -9,7 +9,8 @@ use crate::{
 
 use super::{ClientSingleDriver, ClientSingleInput};
 
-type InnerSingleDriver<S, SIG, const N: usize> = ClientSingleDriver<DegisterCtx<S>, (), ClientDeregister<SIG, N>, ServerDeregister<SIG, N>>;
+type InnerSingleDriver<S, SIG, const N: usize> =
+    ClientSingleDriver<DegisterCtx<S>, (), ClientDeregister<SIG, N>, ServerDeregister<SIG, N>>;
 
 pub struct ClientDeregisterDriver<S, K, H, const N: usize>
 where
@@ -47,7 +48,6 @@ where
     ErrorResponse(ServerErrorResponse),
 }
 
-
 impl<S, K, H, const N: usize> ClientDeregisterDriver<S, K, H, N>
 where
     S: DsaSystem,
@@ -78,9 +78,9 @@ where
 
     pub fn recv(&mut self, packet: Option<ClientDeregisterInput<S, N>>) {
         self.inner.recv(packet.map(|inner| match inner {
-                ClientDeregisterInput::ErrorResponse(respo) => ClientSingleInput::ErrorResponse(respo),
-                ClientDeregisterInput::Response(respo) => ClientSingleInput::Response(respo)
-             }));
+            ClientDeregisterInput::ErrorResponse(respo) => ClientSingleInput::ErrorResponse(respo),
+            ClientDeregisterInput::Response(respo) => ClientSingleInput::Response(respo),
+        }));
     }
 
     pub fn poll_transmit(&mut self) -> Option<ClientDeregisterOutput<S, N>> {

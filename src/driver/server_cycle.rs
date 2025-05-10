@@ -3,10 +3,12 @@ use std::{marker::PhantomData, task::Poll};
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 use uuid::Uuid;
 
-use crate::{protocol::ProtocolKit, CycleInit, CycleVerifyQuery, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerProtocolError, StorageStatus, StoreRegistryQuery};
+use crate::{
+    CycleInit, CycleVerifyQuery, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch,
+    ServerCycle, ServerProtocolError, StorageStatus, StoreRegistryQuery, protocol::ProtocolKit,
+};
 
 use super::ServerPollResult;
-
 
 /// The driver for the server cycle protocol. This works signficantly different
 /// than the client protocols. In this, the final result is acquired by polling the
@@ -20,68 +22,62 @@ where
     K: KemAlgorithm,
 {
     inner: ServerCycleDriverInner<S, K, H, N>,
-    state: DriverState<S, N>
+    state: DriverState<S, N>,
 }
 
 pub struct ServerCycleDriverInner<S, K, H, const N: usize>
-where 
+where
     S: DsaSystem,
-    K: KemAlgorithm
+    K: KemAlgorithm,
 {
     server_sk: S::Private,
     buffer: GrowableAllocRingBuffer<ServerCycleOutput<S>>,
     terminated: bool,
     _h: PhantomData<H>,
-    _k: PhantomData<K>
-
+    _k: PhantomData<K>,
 }
 
 pub enum ServerCycleOutput<S>
-where 
-    S: DsaSystem
+where
+    S: DsaSystem,
 {
-
     VerificationRequest(CycleVerifyQuery<S>),
-    StorageRequest(StoreRegistryQuery<S>)
-
+    StorageRequest(StoreRegistryQuery<S>),
 }
 
-
-
 pub enum ServerCycleInput<S>
-where 
+where
     S: DsaSystem,
 {
     ReceiveRequest(CycleInit<S::Public, S::Signature>),
     VerificationResponse(CycleVerifyStatus<S>),
-    StoreResponse(StorageStatus)
+    StoreResponse(StorageStatus),
 }
 
 pub enum CycleVerifyStatus<S>
-where 
-    S: DsaSystem
+where
+    S: DsaSystem,
 {
     KeyNotUnique,
     Success {
         client_id: Uuid,
         original_public_key: S::Public,
-        new_public_key: S::Public
+        new_public_key: S::Public,
     },
-    Other(String)
+    Other(String),
 }
 
-enum DriverState<S, const N: usize> 
-where 
-    S: DsaSystem
+enum DriverState<S, const N: usize>
+where
+    S: DsaSystem,
 {
     Init,
     WaitingForRequestVerification(CycleInit<S::Public, S::Signature>),
     Errored(Option<ServerProtocolError>),
     Finished(Option<ServerCycle<N, S::Signature>>),
     ServerStore(Option<ServerCycle<N, S::Signature>>),
-    Vacant
+    Vacant,
 }
-
 
 impl<S, K, H, const N: usize> ServerCycleDriver<S, K, H, N>
 where
@@ -96,16 +92,12 @@ where
                 buffer: GrowableAllocRingBuffer::default(),
                 terminated: false,
                 _h: PhantomData,
-                _k: PhantomData
+                _k: PhantomData,
             },
-            state: DriverState::Init
+            state: DriverState::Init,
         }
     }
-    pub fn recv(
-        &mut self,
-        time: MsSinceEpoch,
-        packet: Option<ServerCycleInput<S>>
-    ) {
+    pub fn recv(&mut self, time: MsSinceEpoch, packet: Option<ServerCycleInput<S>>) {
         if self.inner.terminated {
             return;
         }
@@ -116,18 +108,12 @@ where
                 self.inner.terminated = true;
                 self.state = DriverState::Errored(Some(e))
             }
-        } 
+        }
     }
-    pub fn poll_transmit(
-        &mut self
-    ) -> Option<ServerCycleOutput<S>>
-    {
+    pub fn poll_transmit(&mut self) -> Option<ServerCycleOutput<S>> {
         self.inner.buffer.dequeue()
     }
-    pub fn poll_result(
-        &mut self
-    ) -> ServerPollResult<ServerCycle<N, S::Signature>>
-    {
+    pub fn poll_result(&mut self) -> ServerPollResult<ServerCycle<N, S::Signature>> {
         match &mut self.state {
             DriverState::Errored(e) => {
                 let value = e.take().unwrap();
@@ -142,14 +128,12 @@ where
             _ => Poll::Pending,
         }
     }
-
 }
-
 
 fn recv_internal<S, K, H, const N: usize>(
     obj: &mut ServerCycleDriver<S, K, H, N>,
     packet: Option<ServerCycleInput<S>>,
-    current_time: MsSinceEpoch
+    current_time: MsSinceEpoch,
 ) -> Result<(), ServerProtocolError>
 where
     S: DsaSystem,
@@ -158,12 +142,13 @@ where
 {
     let state = match &mut obj.state {
         DriverState::Init => handle_registry_init(&mut obj.inner, packet)?,
-       DriverState::WaitingForRequestVerification(inner) => handle_verification(&mut obj.inner, packet, inner, current_time)?,
-       DriverState::ServerStore(inner) => handle_store_wait(&mut obj.inner, packet, inner)?,
+        DriverState::WaitingForRequestVerification(inner) => {
+            handle_verification(&mut obj.inner, packet, inner, current_time)?
+        }
+        DriverState::ServerStore(inner) => handle_store_wait(&mut obj.inner, packet, inner)?,
         DriverState::Errored(_) => None,
         DriverState::Finished(_) => None,
         DriverState::Vacant => None,
-      
     };
 
     if let Some(inner) = state {
@@ -192,7 +177,12 @@ where
         ServerCycleInput::ReceiveRequest(request) => {
             // Send out a verification request, this will also fetch the new key from the database with
             // which we can actually validate the request.
-            inner.buffer.enqueue(ServerCycleOutput::VerificationRequest(CycleVerifyQuery { client_id: request.body.identifier, new_public_key: (*request.body.new_public_key).clone() }));
+            inner
+                .buffer
+                .enqueue(ServerCycleOutput::VerificationRequest(CycleVerifyQuery {
+                    client_id: request.body.identifier,
+                    new_public_key: (*request.body.new_public_key).clone(),
+                }));
             Ok(Some(DriverState::WaitingForRequestVerification(request)))
         }
         _ => {
@@ -202,12 +192,11 @@ where
     }
 }
 
-
 fn handle_verification<S, K, H, const HS: usize>(
     inner: &mut ServerCycleDriverInner<S, K, H, HS>,
     packet: Option<ServerCycleInput<S>>,
     init_msg: &CycleInit<S::Public, S::Signature>,
-    current_time: MsSinceEpoch
+    current_time: MsSinceEpoch,
 ) -> Result<Option<DriverState<S, HS>>, ServerProtocolError>
 where
     S: DsaSystem,
@@ -223,13 +212,27 @@ where
         ServerCycleInput::VerificationResponse(response) => match response {
             CycleVerifyStatus::KeyNotUnique => Err(ServerProtocolError::PublicKeyNotUnique),
             CycleVerifyStatus::Other(reason) => Err(ServerProtocolError::Misc(reason)),
-            CycleVerifyStatus::Success { client_id, original_public_key, new_public_key } => {
+            CycleVerifyStatus::Success {
+                client_id,
+                original_public_key,
+                new_public_key,
+            } => {
                 // Verify the request and then issue a store operation.
-                let response = ProtocolKit::<S, K, H, HS>::server_cycle(init_msg, &original_public_key, &inner.server_sk)?;
-                inner.buffer.enqueue(ServerCycleOutput::StorageRequest(StoreRegistryQuery { client_id, public_key: new_public_key, time: current_time }));
+                let response = ProtocolKit::<S, K, H, HS>::server_cycle(
+                    init_msg,
+                    &original_public_key,
+                    &inner.server_sk,
+                )?;
+                inner
+                    .buffer
+                    .enqueue(ServerCycleOutput::StorageRequest(StoreRegistryQuery {
+                        client_id,
+                        public_key: new_public_key,
+                        time: current_time,
+                    }));
                 Ok(Some(DriverState::ServerStore(Some(response))))
             }
-        }
+        },
         _ => {
             /* Nothig */
             Ok(None)
@@ -237,17 +240,15 @@ where
     }
 }
 
-
 fn handle_store_wait<S, K, H, const HS: usize>(
     inner: &mut ServerCycleDriverInner<S, K, H, HS>,
     packet: Option<ServerCycleInput<S>>,
-    resp: &mut Option<ServerCycle<HS, S::Signature>>
+    resp: &mut Option<ServerCycle<HS, S::Signature>>,
 ) -> Result<Option<DriverState<S, HS>>, ServerProtocolError>
 where
-    
     S: DsaSystem,
     K: KemAlgorithm,
-    H: HashingAlgorithm<HS>
+    H: HashingAlgorithm<HS>,
 {
     // We only want to proceed if the packet is not none.
     let Some(packet) = packet else {
@@ -260,11 +261,9 @@ where
                 // We have succesfully completed the operation.
                 inner.terminated = true;
                 Ok(Some(DriverState::Finished(resp.take())))
-            },
-            StorageStatus::Failure(error) => {
-                Err(ServerProtocolError::StoreFailure(error))
             }
-        }
+            StorageStatus::Failure(error) => Err(ServerProtocolError::StoreFailure(error)),
+        },
         _ => {
             /* Nothig */
             Ok(None)
@@ -272,213 +271,325 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use crate::{protocol::ProtocolKit, testutil::BasicSetupDetails, CycleVerifyQuery, DsaSystem, StorageStatus, StoreRegistryQuery};
-
-
+    use crate::{
+        CycleVerifyQuery, DsaSystem, StorageStatus, StoreRegistryQuery, protocol::ProtocolKit,
+        testutil::BasicSetupDetails,
+    };
 
     #[test]
-fn test_server_cycle_happy_path() {
-    use crate::{
-        ServerCycleDriver, ServerCycleInput, ServerCycleOutput, CycleVerifyStatus,
-        MsSinceEpoch,
-    };
-    use crate::core::crypto::specials::{FauxChain, FauxKem};
-    use sha3::Sha3_256;
+    fn test_server_cycle_happy_path() {
+        use crate::core::crypto::specials::{FauxChain, FauxKem};
+        use crate::{
+            CycleVerifyStatus, MsSinceEpoch, ServerCycleDriver, ServerCycleInput, ServerCycleOutput,
+        };
+        use sha3::Sha3_256;
 
-    const N: usize = 32;
-    type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
+        const N: usize = 32;
+        type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
 
-    let setup = BasicSetupDetails::<FauxChain>::new();
-    let mut driver = Driver::new(setup.server_sk.clone());
+        let setup = BasicSetupDetails::<FauxChain>::new();
+        let mut driver = Driver::new(setup.server_sk.clone());
 
-    let (old_client_pk, old_client_sk) = FauxChain::generate().unwrap();
+        let (old_client_pk, old_client_sk) = FauxChain::generate().unwrap();
 
-    let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_cycle_init(setup.client_id, &old_client_sk).unwrap();
+        let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_cycle_init(
+            setup.client_id,
+            &old_client_sk,
+        )
+        .unwrap();
 
-    driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())));
+        driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())),
+        );
 
-    let Some(ServerCycleOutput::VerificationRequest(CycleVerifyQuery { client_id, new_public_key: _ })) = driver.poll_transmit() else {
-        panic!("Expected verification request to be queued");
-    };
-    assert_eq!(client_id, setup.client_id);
+        let Some(ServerCycleOutput::VerificationRequest(CycleVerifyQuery {
+            client_id,
+            new_public_key: _,
+        })) = driver.poll_transmit()
+        else {
+            panic!("Expected verification request to be queued");
+        };
+        assert_eq!(client_id, setup.client_id);
 
-    driver.recv(MsSinceEpoch(10), Some(ServerCycleInput::VerificationResponse(
-        CycleVerifyStatus::Success {
-            client_id: setup.client_id,
-            original_public_key: old_client_pk,
-            new_public_key: (*cycle_init.body.new_public_key).clone(),
-        }
-    )));
+        driver.recv(
+            MsSinceEpoch(10),
+            Some(ServerCycleInput::VerificationResponse(
+                CycleVerifyStatus::Success {
+                    client_id: setup.client_id,
+                    original_public_key: old_client_pk,
+                    new_public_key: (*cycle_init.body.new_public_key).clone(),
+                },
+            )),
+        );
 
-    let Some(ServerCycleOutput::StorageRequest(StoreRegistryQuery { client_id, public_key: _, time })) = driver.poll_transmit() else {
-        panic!("Expected storage request to be queued");
-    };
-    assert_eq!(client_id, setup.client_id);
-    assert_eq!(time, MsSinceEpoch(10));
+        let Some(ServerCycleOutput::StorageRequest(StoreRegistryQuery {
+            client_id,
+            public_key: _,
+            time,
+        })) = driver.poll_transmit()
+        else {
+            panic!("Expected storage request to be queued");
+        };
+        assert_eq!(client_id, setup.client_id);
+        assert_eq!(time, MsSinceEpoch(10));
 
-    driver.recv(MsSinceEpoch(20), Some(ServerCycleInput::StoreResponse(StorageStatus::Success)));
-    let result = driver.poll_result();
-    assert!(matches!(result, std::task::Poll::Ready(Ok(_))));
-}
+        driver.recv(
+            MsSinceEpoch(20),
+            Some(ServerCycleInput::StoreResponse(StorageStatus::Success)),
+        );
+        let result = driver.poll_result();
+        assert!(matches!(result, std::task::Poll::Ready(Ok(_))));
+    }
 
-#[test]
-fn test_server_cycle_sends_verification_request() {
-    use crate::{ServerCycleDriver, ServerCycleInput, ServerCycleOutput, MsSinceEpoch};
-    use crate::core::crypto::specials::{FauxChain, FauxKem};
-    use sha3::Sha3_256;
+    #[test]
+    fn test_server_cycle_sends_verification_request() {
+        use crate::core::crypto::specials::{FauxChain, FauxKem};
+        use crate::{MsSinceEpoch, ServerCycleDriver, ServerCycleInput, ServerCycleOutput};
+        use sha3::Sha3_256;
 
-    const N: usize = 32;
-    type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
+        const N: usize = 32;
+        type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
 
-    let setup = BasicSetupDetails::<FauxChain>::new();
-    let mut driver = Driver::new(setup.server_sk.clone());
+        let setup = BasicSetupDetails::<FauxChain>::new();
+        let mut driver = Driver::new(setup.server_sk.clone());
 
-    let (_, old_client_sk) = FauxChain::generate().unwrap();
-    let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(setup.client_id, &old_client_sk).unwrap();
+        let (_, old_client_sk) = FauxChain::generate().unwrap();
+        let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(
+            setup.client_id,
+            &old_client_sk,
+        )
+        .unwrap();
 
-    driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())));
+        driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())),
+        );
 
-    let Some(ServerCycleOutput::VerificationRequest(CycleVerifyQuery { client_id, .. })) = driver.poll_transmit() else {
-        panic!("Expected verification request to be queued");
-    };
-    assert_eq!(client_id, setup.client_id);
-}
+        let Some(ServerCycleOutput::VerificationRequest(CycleVerifyQuery { client_id, .. })) =
+            driver.poll_transmit()
+        else {
+            panic!("Expected verification request to be queued");
+        };
+        assert_eq!(client_id, setup.client_id);
+    }
 
-#[test]
-fn test_server_cycle_fails_on_key_not_unique() {
-    use crate::{ServerCycleDriver, ServerCycleInput, CycleVerifyStatus, ServerPollResult, ServerProtocolError, MsSinceEpoch};
-    use crate::core::crypto::specials::{FauxChain, FauxKem};
-    use sha3::Sha3_256;
+    #[test]
+    fn test_server_cycle_fails_on_key_not_unique() {
+        use crate::core::crypto::specials::{FauxChain, FauxKem};
+        use crate::{
+            CycleVerifyStatus, MsSinceEpoch, ServerCycleDriver, ServerCycleInput, ServerPollResult,
+            ServerProtocolError,
+        };
+        use sha3::Sha3_256;
 
-    const N: usize = 32;
-    type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
+        const N: usize = 32;
+        type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
 
-    let setup = BasicSetupDetails::<FauxChain>::new();
-    let mut driver = Driver::new(setup.server_sk.clone());
+        let setup = BasicSetupDetails::<FauxChain>::new();
+        let mut driver = Driver::new(setup.server_sk.clone());
 
-    let (_, old_client_sk) = FauxChain::generate().unwrap();
-    let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(setup.client_id, &old_client_sk).unwrap();
+        let (_, old_client_sk) = FauxChain::generate().unwrap();
+        let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(
+            setup.client_id,
+            &old_client_sk,
+        )
+        .unwrap();
 
-    driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())));
+        driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())),
+        );
 
-    driver.recv(MsSinceEpoch(10), Some(ServerCycleInput::VerificationResponse(CycleVerifyStatus::KeyNotUnique)));
+        driver.recv(
+            MsSinceEpoch(10),
+            Some(ServerCycleInput::VerificationResponse(
+                CycleVerifyStatus::KeyNotUnique,
+            )),
+        );
 
-    let ServerPollResult::Ready(Err(ServerProtocolError::PublicKeyNotUnique)) = driver.poll_result() else {
-        panic!("Expected PublicKeyNotUnique error");
-    };
-}
+        let ServerPollResult::Ready(Err(ServerProtocolError::PublicKeyNotUnique)) =
+            driver.poll_result()
+        else {
+            panic!("Expected PublicKeyNotUnique error");
+        };
+    }
 
+    #[test]
+    fn test_server_cycle_fails_on_misc_error() {
+        use crate::core::crypto::specials::{FauxChain, FauxKem};
+        use crate::{
+            CycleVerifyStatus, MsSinceEpoch, ServerCycleDriver, ServerCycleInput, ServerPollResult,
+            ServerProtocolError,
+        };
+        use sha3::Sha3_256;
 
-#[test]
-fn test_server_cycle_fails_on_misc_error() {
-    use crate::{ServerCycleDriver, ServerCycleInput, CycleVerifyStatus, ServerPollResult, ServerProtocolError, MsSinceEpoch};
-    use crate::core::crypto::specials::{FauxChain, FauxKem};
-    use sha3::Sha3_256;
+        const N: usize = 32;
+        type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
 
-    const N: usize = 32;
-    type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
+        let setup = BasicSetupDetails::<FauxChain>::new();
+        let mut driver = Driver::new(setup.server_sk.clone());
 
-    let setup = BasicSetupDetails::<FauxChain>::new();
-    let mut driver = Driver::new(setup.server_sk.clone());
+        let (_, old_client_sk) = FauxChain::generate().unwrap();
+        let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(
+            setup.client_id,
+            &old_client_sk,
+        )
+        .unwrap();
 
-    let (_, old_client_sk) = FauxChain::generate().unwrap();
-    let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(setup.client_id, &old_client_sk).unwrap();
+        driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerCycleInput::ReceiveRequest(cycle_init)),
+        );
 
-    driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init)));
+        driver.recv(
+            MsSinceEpoch(10),
+            Some(ServerCycleInput::VerificationResponse(
+                CycleVerifyStatus::Other("Bad Sig".to_string()),
+            )),
+        );
 
-    driver.recv(MsSinceEpoch(10), Some(ServerCycleInput::VerificationResponse(CycleVerifyStatus::Other("Bad Sig".to_string()))));
+        let ServerPollResult::Ready(Err(ServerProtocolError::Misc(reason))) = driver.poll_result()
+        else {
+            panic!("Expected miscellaneous verification failure");
+        };
+        assert_eq!(reason, "Bad Sig");
+    }
 
-    let ServerPollResult::Ready(Err(ServerProtocolError::Misc(reason))) = driver.poll_result() else {
-        panic!("Expected miscellaneous verification failure");
-    };
-    assert_eq!(reason, "Bad Sig");
-}
+    #[test]
+    fn test_server_cycle_fails_on_storage_error() {
+        use crate::core::crypto::specials::{FauxChain, FauxKem};
+        use crate::{
+            CycleVerifyStatus, MsSinceEpoch, ServerCycleDriver, ServerCycleInput, ServerPollResult,
+            ServerProtocolError,
+        };
+        use sha3::Sha3_256;
 
-#[test]
-fn test_server_cycle_fails_on_storage_error() {
-    use crate::{ServerCycleDriver, ServerCycleInput, CycleVerifyStatus, ServerPollResult, ServerProtocolError, MsSinceEpoch};
-    use crate::core::crypto::specials::{FauxChain, FauxKem};
-    use sha3::Sha3_256;
+        const N: usize = 32;
+        type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
 
-    const N: usize = 32;
-    type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
+        let setup = BasicSetupDetails::<FauxChain>::new();
+        let mut driver = Driver::new(setup.server_sk.clone());
 
-    let setup = BasicSetupDetails::<FauxChain>::new();
-    let mut driver = Driver::new(setup.server_sk.clone());
+        let (old_pk, old_sk) = FauxChain::generate().unwrap();
+        let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(
+            setup.client_id,
+            &old_sk,
+        )
+        .unwrap();
 
-    let (old_pk, old_sk) = FauxChain::generate().unwrap();
-    let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(setup.client_id, &old_sk).unwrap();
+        driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())),
+        );
+        driver.poll_transmit(); // Skip verification request
 
-    driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())));
-    driver.poll_transmit(); // Skip verification request
+        driver.recv(
+            MsSinceEpoch(10),
+            Some(ServerCycleInput::VerificationResponse(
+                CycleVerifyStatus::Success {
+                    client_id: setup.client_id,
+                    original_public_key: old_pk,
+                    new_public_key: (*cycle_init.body.new_public_key).clone(),
+                },
+            )),
+        );
 
-    driver.recv(MsSinceEpoch(10), Some(ServerCycleInput::VerificationResponse(CycleVerifyStatus::Success {
-        client_id: setup.client_id,
-        original_public_key: old_pk,
-        new_public_key: (*cycle_init.body.new_public_key).clone(),
-    })));
+        driver.poll_transmit(); // Skip storage request
 
-    driver.poll_transmit(); // Skip storage request
+        driver.recv(
+            MsSinceEpoch(20),
+            Some(ServerCycleInput::StoreResponse(StorageStatus::Failure(
+                "DB down".to_string(),
+            ))),
+        );
 
-    driver.recv(MsSinceEpoch(20), Some(ServerCycleInput::StoreResponse(StorageStatus::Failure("DB down".to_string()))));
+        let ServerPollResult::Ready(Err(ServerProtocolError::StoreFailure(reason))) =
+            driver.poll_result()
+        else {
+            panic!("Expected storage failure");
+        };
+        assert_eq!(reason, "DB down");
+    }
 
-    let ServerPollResult::Ready(Err(ServerProtocolError::StoreFailure(reason))) = driver.poll_result() else {
-        panic!("Expected storage failure");
-    };
-    assert_eq!(reason, "DB down");
-}
+    #[test]
+    fn test_server_cycle_ignores_after_error() {
+        use crate::core::crypto::specials::{FauxChain, FauxKem};
+        use crate::{
+            CycleVerifyStatus, MsSinceEpoch, ServerCycleDriver, ServerCycleInput, ServerPollResult,
+            ServerProtocolError,
+        };
+        use sha3::Sha3_256;
 
-#[test]
-fn test_server_cycle_ignores_after_error() {
-    use crate::{ServerCycleDriver, ServerCycleInput, CycleVerifyStatus, ServerPollResult, ServerProtocolError, MsSinceEpoch};
-    use crate::core::crypto::specials::{FauxChain, FauxKem};
-    use sha3::Sha3_256;
+        const N: usize = 32;
+        type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
 
-    const N: usize = 32;
-    type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
+        let setup = BasicSetupDetails::<FauxChain>::new();
+        let mut driver = Driver::new(setup.server_sk.clone());
 
-    let setup = BasicSetupDetails::<FauxChain>::new();
-    let mut driver = Driver::new(setup.server_sk.clone());
+        let (_, old_sk) = FauxChain::generate().unwrap();
+        let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(
+            setup.client_id,
+            &old_sk,
+        )
+        .unwrap();
 
-    let (_, old_sk) = FauxChain::generate().unwrap();
-    let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(setup.client_id, &old_sk).unwrap();
+        driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())),
+        );
+        driver.recv(
+            MsSinceEpoch(5),
+            Some(ServerCycleInput::VerificationResponse(
+                CycleVerifyStatus::Other("oops".to_string()),
+            )),
+        );
 
-    driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())));
-    driver.recv(MsSinceEpoch(5), Some(ServerCycleInput::VerificationResponse(CycleVerifyStatus::Other("oops".to_string()))));
+        // Should now be in error state
+        driver.recv(
+            MsSinceEpoch(10),
+            Some(ServerCycleInput::StoreResponse(StorageStatus::Success)),
+        );
+        assert!(matches!(
+            driver.poll_result(),
+            ServerPollResult::Ready(Err(ServerProtocolError::Misc(_)))
+        ));
 
-    // Should now be in error state
-    driver.recv(MsSinceEpoch(10), Some(ServerCycleInput::StoreResponse(StorageStatus::Success)));
-    assert!(matches!(driver.poll_result(), ServerPollResult::Ready(Err(ServerProtocolError::Misc(_)))));
+        // All future recvs should be ignored
+        driver.recv(
+            MsSinceEpoch(15),
+            Some(ServerCycleInput::StoreResponse(StorageStatus::Success)),
+        );
+        assert!(matches!(driver.poll_result(), ServerPollResult::Pending));
+    }
 
-    // All future recvs should be ignored
-    driver.recv(MsSinceEpoch(15), Some(ServerCycleInput::StoreResponse(StorageStatus::Success)));
-    assert!(matches!(driver.poll_result(), ServerPollResult::Pending));
-}
+    #[test]
+    fn test_server_cycle_result_pending_if_incomplete() {
+        use crate::core::crypto::specials::{FauxChain, FauxKem};
+        use crate::{MsSinceEpoch, ServerCycleDriver, ServerCycleInput, ServerPollResult};
+        use sha3::Sha3_256;
 
+        const N: usize = 32;
+        type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
 
-#[test]
-fn test_server_cycle_result_pending_if_incomplete() {
-    use crate::{ServerCycleDriver, ServerCycleInput, ServerPollResult, MsSinceEpoch};
-    use crate::core::crypto::specials::{FauxChain, FauxKem};
-    use sha3::Sha3_256;
+        let setup = BasicSetupDetails::<FauxChain>::new();
+        let mut driver = Driver::new(setup.server_sk.clone());
 
-    const N: usize = 32;
-    type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
+        let (_, old_sk) = FauxChain::generate().unwrap();
+        let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(
+            setup.client_id,
+            &old_sk,
+        )
+        .unwrap();
 
-    let setup = BasicSetupDetails::<FauxChain>::new();
-    let mut driver = Driver::new(setup.server_sk.clone());
+        driver.recv(
+            MsSinceEpoch(0),
+            Some(ServerCycleInput::ReceiveRequest(cycle_init)),
+        );
 
-    let (_, old_sk) = FauxChain::generate().unwrap();
-    let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(setup.client_id, &old_sk).unwrap();
-
-    driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init)));
-
-    let result = driver.poll_result();
-    assert!(matches!(result, ServerPollResult::Pending));
-}
-
-
+        let result = driver.poll_result();
+        assert!(matches!(result, ServerPollResult::Pending));
+    }
 }

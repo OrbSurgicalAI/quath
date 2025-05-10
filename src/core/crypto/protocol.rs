@@ -454,10 +454,7 @@ where
         proof: &S::Signature,
         server_pk: &S::Public,
     ) -> ClientProtocolResult<()> {
-        let combined_hash = H::hash_sequence(&[
-            token_hash,
-            &proof.view(),
-        ]);
+        let combined_hash = H::hash_sequence(&[token_hash, &proof.view()]);
         if combined_hash != *response.revoke_hash {
             return Err(ClientProtocolError::FailedToValidateRevocationHash);
         }
@@ -488,35 +485,37 @@ where
     pub fn server_deregister(
         request: &ClientDeregister<S::Signature, HS>,
         claimant_pk: &S::Public,
-        server_sk: &S::Private
-    ) -> ServerProtocolResult<ServerDeregister<S::Signature, HS>>
-    {
-        let combined = H::hash_sequence(&[ &request.target.to_bytes_le(), &request.claimant.to_bytes_le() ]);
+        server_sk: &S::Private,
+    ) -> ServerProtocolResult<ServerDeregister<S::Signature, HS>> {
+        let combined = H::hash_sequence(&[
+            &request.target.to_bytes_le(),
+            &request.claimant.to_bytes_le(),
+        ]);
         if !claimant_pk.verify(&combined, &*request.proof) {
             return Err(ServerProtocolError::FailedToVerifyDeregisterHash);
         }
 
-
-        let proof = server_sk.sign_bytes(&combined)
+        let proof = server_sk
+            .sign_bytes(&combined)
             .map_err(|_| ServerProtocolError::FailedToSignResponse)?;
 
-        Ok(ServerDeregister { approval: B64(combined), proof: B64(proof) })
+        Ok(ServerDeregister {
+            approval: B64(combined),
+            proof: B64(proof),
+        })
     }
     pub fn client_deregister_finish(
         target: Uuid,
         claimant_id: Uuid,
         response: &ServerDeregister<S::Signature, HS>,
-        server_pk: &S::Public
-    ) -> ClientProtocolResult<()>
-    {
-
-        let calculated = H::hash_sequence(&[ &target.to_bytes_le(), &claimant_id.to_bytes_le() ]);
+        server_pk: &S::Public,
+    ) -> ClientProtocolResult<()> {
+        let calculated = H::hash_sequence(&[&target.to_bytes_le(), &claimant_id.to_bytes_le()]);
 
         // Check that the hash is actually valid.
         if *response.approval != calculated {
             return Err(ClientProtocolError::FailedToVerifyDeregisterHash);
         }
-
 
         // verify that the signature is legit.
         if !server_pk.verify(&*response.approval, &*response.proof) {
@@ -524,7 +523,6 @@ where
         }
 
         Ok(())
-
     }
 }
 
@@ -658,7 +656,12 @@ mod tests {
         )
         .unwrap();
 
-        ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_revoke_finish(&resp, &token_hash, &client_req.proof, &server_pk)
+        ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_revoke_finish(
+            &resp,
+            &token_hash,
+            &client_req.proof,
+            &server_pk,
+        )
         .unwrap();
 
         Ok(())
@@ -670,23 +673,25 @@ mod tests {
         let (claim_pk, claim_sk) = FauxChain::generate().unwrap();
         let (server_pk, server_sk) = FauxChain::generate().unwrap();
 
+        let client_req = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_deregister_init(
+            claimant_id,
+            claimant_id,
+            &claim_sk,
+        )
+        .unwrap();
 
-        let client_req =
-            ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_deregister_init(
-                claimant_id,
-                claimant_id,
-                &claim_sk
-            )
-            .unwrap();
-
-        let resp = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::server_deregister(&client_req, &claim_pk, &server_sk)
+        let resp = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::server_deregister(
+            &client_req,
+            &claim_pk,
+            &server_sk,
+        )
         .unwrap();
 
         ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_deregister_finish(
             client_req.target,
             client_req.claimant,
             &resp,
-            &server_pk
+            &server_pk,
         )
         .unwrap();
 
