@@ -41,7 +41,7 @@ pub enum ServerProtocolError {
     #[error("Token does not exist, could not verify.")]
     TokenDoesNotExist,
     #[error("Server could not verify the permission string.")]
-    TokenPermissionError(String),
+    TokenPermissionError,
     #[error("Failed to verify token revocation request")]
     FailedToVerifyRevocationRequest,
     #[error("Failed to verify the signature on the hash sent for authenticating the deregistering request.")]
@@ -83,7 +83,7 @@ impl ServerProtocolError {
             Self::InvalidClientUuid => "InvalidClientUuid",
             Self::TokenExpired => "TokenExpired",
             Self::TokenDoesNotExist => "TokenDoesNotExist",
-            Self::TokenPermissionError(_) => "TokenPermissionError",
+            Self::TokenPermissionError => "TokenPermissionError",
             Self::FailedToVerifyRevocationRequest => "FailedToVerifyRevocationRequest",
             Self::FailedToVerifyDeregisterHash => "FailedToVerifyDeregisterHash",
             Self::UnauthorizedTokenRequest => "UnauthorizedTokenRequest",

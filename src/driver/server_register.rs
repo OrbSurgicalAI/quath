@@ -3,10 +3,9 @@ use std::{marker::PhantomData, task::Poll};
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 use uuid::Uuid;
 
-use crate::core::crypto::{
-    ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch,
-    ServerProtocolError, ServerRegister, protocol::ProtocolKit,
-};
+use crate::{core::crypto::{
+    protocol::ProtocolKit, ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerProtocolError, ServerRegister
+}, StorageStatus, StoreRegistryQuery, VerifyRequestIntegrityQuery};
 
 use super::ServerPollResult;
 
@@ -73,8 +72,7 @@ where
 {
     ClientRequest(ClientRegisterInit<S::Public, S::Signature>),
     VerificationResponse(VerifyRequestIntegrityResponse<S>),
-    StoreSucess,
-    StoreFailure(String),
+    StoreResponse(StorageStatus)
 }
 
 pub enum ServerRegistryOutput<S, const N: usize>
@@ -84,16 +82,8 @@ where
     /// The ID needs to be checked for uniqueness, alongsie
     /// the public key, and finally we need to fetch the corresponding
     /// administrator public key.
-    VerifyRequestIntegrity {
-        requested_id: Uuid,
-        admin_id: Uuid,
-        public_key: S::Public,
-    },
-    StoreRegistry {
-        client_id: Uuid,
-        public_key: S::Public,
-        time: MsSinceEpoch,
-    },
+    VerifyRequestIntegrity(VerifyRequestIntegrityQuery<S>),
+    StoreRegistry(StoreRegistryQuery<S>),
 }
 
 pub enum VerifyRequestIntegrityResponse<S>
@@ -224,11 +214,11 @@ where
             // Queue an information request, this will usually be serviced by a database.
             inner
                 .buffer
-                .enqueue(ServerRegistryOutput::VerifyRequestIntegrity {
+                .enqueue(ServerRegistryOutput::VerifyRequestIntegrity(VerifyRequestIntegrityQuery {
                     requested_id: client.body.identifier,
                     admin_id: client.body.admin_approval_id,
                     public_key: (*client.body.public_key).clone(),
-                });
+                }));
 
             // Wait for the service to respond.
             return Ok(Some(DriverState::PerformRegistryVerification {
@@ -274,7 +264,7 @@ where
                 )?;
 
                 // inner.buffer.enqueue(ServerRegistryOutput::RegistryResponse(req));
-                inner.buffer.enqueue(ServerRegistryOutput::StoreRegistry { client_id: request.body.identifier, public_key: (*request.body.public_key).clone(), time: current_time });
+                inner.buffer.enqueue(ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { client_id: request.body.identifier, public_key: (*request.body.public_key).clone(), time: current_time }));
                 return Ok(Some(DriverState::WaitingForStore(Some(req))));
             }
         },
@@ -298,14 +288,15 @@ where
     };
 
     match packet {
-        ServerRegistryInput::StoreSucess => {
-            inner.terminated = true;
+        ServerRegistryInput::StoreResponse(storage_res) => match storage_res {
+            StorageStatus::Success => {
+                inner.terminated = true;
+                let response = request.take().unwrap();
 
-            let response = request.take().unwrap();
-
-            Ok(Some(DriverState::Finished(Some(response))))
+                Ok(Some(DriverState::Finished(Some(response))))
+            }
+            StorageStatus::Failure(reason) => Err(ServerProtocolError::StoreFailure(reason))
         }
-        ServerRegistryInput::StoreFailure(reason) => Err(ServerProtocolError::StoreFailure(reason)),
         _ => Ok(None), // nothing
     }
 }
@@ -381,11 +372,11 @@ mod tests {
             .poll_transmit()
             .expect("Expected VerifyRequestIntegrity");
         match output {
-            ServerRegistryOutput::VerifyRequestIntegrity {
+            ServerRegistryOutput::VerifyRequestIntegrity(VerifyRequestIntegrityQuery {
                 requested_id,
                 admin_id,
                 public_key,
-            } => {
+            }) => {
                 assert_eq!(requested_id, setup.client_id);
                 assert_eq!(admin_id, setup.admin_id);
                 assert_eq!(public_key.view(), (*req_pub).clone().view());
@@ -401,7 +392,7 @@ mod tests {
                 },
             )));
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreSucess));
+        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
 
         match setup.driver.poll_result() {
             Poll::Ready(Ok(server_reg)) => {
@@ -558,9 +549,9 @@ mod tests {
                 },
             )));
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreFailure(
+        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Failure(
             "store failed".into(),
-        )));
+        ))));
 
         match setup.driver.poll_result() {
             Poll::Ready(Err(ServerProtocolError::StoreFailure(msg))) => {
@@ -594,13 +585,13 @@ mod tests {
                 },
             )));
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreSucess));
+        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
         let _ = setup.driver.poll_result();
 
         // This should not do anything:
         setup
             .driver
-            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreFailure("ignored".into())));
+            .recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Failure("ignored".into()))));
 
         match setup.driver.poll_result() {
             Poll::Ready(_) => panic!("Should not emit anything after termination"),
@@ -631,12 +622,12 @@ mod tests {
                 },
             )));
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreSucess));
+        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
 
         assert!(matches!(setup.driver.poll_result(), Poll::Ready(Ok(_))));
 
         // Subsequent success does nothing
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreSucess));
+        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
         assert!(matches!(setup.driver.poll_result(), Poll::Pending));
     }
 
@@ -653,7 +644,7 @@ mod tests {
     fn test_out_of_order_store_success_is_ignored() {
         let mut setup = setup_driver();
         // Should be ignored because state isn't WaitingForStore
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreSucess));
+        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
         assert!(setup.driver.poll_result().is_pending());
     }
 
@@ -679,7 +670,7 @@ mod tests {
                     admin_public: setup.admin_pk.clone(),
                 },
             )));
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreSucess));
+        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
 
         let result1 = setup.driver.poll_result();
         let result2 = setup.driver.poll_result();
@@ -720,7 +711,7 @@ mod tests {
         // WaitingForStore
         setup.driver.recv(MsSinceEpoch(0), None);
 
-        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreSucess));
+        setup.driver.recv(MsSinceEpoch(0), Some(ServerRegistryInput::StoreResponse(StorageStatus::Success)));
 
         // Finished
         let _ = setup.driver.poll_result();
@@ -744,7 +735,7 @@ fn test_store_registry_output_after_successful_verification() {
     // Clear the VerifyRequestIntegrity output
     let integrity_check = setup.driver.poll_transmit();
     match integrity_check {
-        Some(ServerRegistryOutput::VerifyRequestIntegrity { requested_id, admin_id, .. }) => {
+        Some(ServerRegistryOutput::VerifyRequestIntegrity(VerifyRequestIntegrityQuery { requested_id, admin_id, .. })) => {
             assert_eq!(requested_id, setup.client_id);
             assert_eq!(admin_id, setup.admin_id);
         }
@@ -761,7 +752,7 @@ fn test_store_registry_output_after_successful_verification() {
     // Check for StoreRegistry output
     let output = setup.driver.poll_transmit();
     match output {
-        Some(ServerRegistryOutput::StoreRegistry { client_id, public_key, time }) => {
+        Some(ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { client_id, public_key, time })) => {
             assert_eq!(client_id, setup.client_id);
             assert_eq!(public_key.view(), client_pk.view());
             // assert_eq!(time, setup.time);

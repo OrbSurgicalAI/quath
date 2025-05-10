@@ -6,6 +6,7 @@ use std::{
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Eq, Ord)]
 pub struct MsSinceEpoch(pub i64);
 
+#[derive(Debug, Clone)]
 pub struct TokenValidityInterval {
     backwards: Duration,
     forwards: Duration,

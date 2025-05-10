@@ -3,7 +3,7 @@ use std::{marker::PhantomData, task::Poll};
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 use uuid::Uuid;
 
-use crate::{protocol::ProtocolKit, CycleInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerProtocolError};
+use crate::{protocol::ProtocolKit, CycleInit, CycleVerifyQuery, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerProtocolError, StorageStatus, StoreRegistryQuery};
 
 use super::ServerPollResult;
 
@@ -64,17 +64,12 @@ where
     S: DsaSystem
 {
 
-    VerificationRequest {
-        client_id: Uuid,
-        new_public_key: S::Public
-    },
-    StorageRequest {
-        client_id: Uuid,
-        new_public_key: S::Public,
-        time: MsSinceEpoch
-    }
+    VerificationRequest(CycleVerifyQuery<S>),
+    StorageRequest(StoreRegistryQuery<S>)
 
 }
+
+
 
 pub enum ServerCycleInput<S>
 where 
@@ -82,8 +77,7 @@ where
 {
     ReceiveRequest(CycleInit<S::Public, S::Signature>),
     VerificationResponse(CycleVerifyStatus<S>),
-    StoreSucess,
-    StoreFailure(String)
+    StoreResponse(StorageStatus)
 }
 
 pub enum CycleVerifyStatus<S>
@@ -221,7 +215,7 @@ where
         ServerCycleInput::ReceiveRequest(request) => {
             // Send out a verification request, this will also fetch the new key from the database with
             // which we can actually validate the request.
-            inner.buffer.enqueue(ServerCycleOutput::VerificationRequest { client_id: request.body.identifier, new_public_key: (*request.body.new_public_key).clone() });
+            inner.buffer.enqueue(ServerCycleOutput::VerificationRequest(CycleVerifyQuery { client_id: request.body.identifier, new_public_key: (*request.body.new_public_key).clone() }));
             return Ok(Some(DriverState::WaitingForRequestVerification(request)));
         }
         _ => {
@@ -255,7 +249,7 @@ where
             CycleVerifyStatus::Success { client_id, original_public_key, new_public_key } => {
                 // Verify the request and then issue a store operation.
                 let response = ProtocolKit::<S, K, H, HS>::server_cycle(init_msg, &original_public_key, &inner.server_sk)?;
-                inner.buffer.enqueue(ServerCycleOutput::StorageRequest { client_id: client_id, new_public_key: new_public_key, time: current_time });
+                inner.buffer.enqueue(ServerCycleOutput::StorageRequest(StoreRegistryQuery { client_id: client_id, public_key: new_public_key, time: current_time }));
                 Ok(Some(DriverState::ServerStore(Some(response))))
             }
         }
@@ -284,12 +278,16 @@ where
     };
 
     match packet {
-        ServerCycleInput::StoreSucess => {
-            // We have succesfully completed the operation.
-            inner.terminated = true;
-            return Ok(Some(DriverState::Finished(resp.take())))
-        },
-        ServerCycleInput::StoreFailure(failure) => Err(ServerProtocolError::StoreFailure(failure)),
+        ServerCycleInput::StoreResponse(r) => match r {
+            StorageStatus::Success => {
+                // We have succesfully completed the operation.
+                inner.terminated = true;
+                return Ok(Some(DriverState::Finished(resp.take())))
+            },
+            StorageStatus::Failure(error) => {
+                Err(ServerProtocolError::StoreFailure(error))
+            }
+        }
         _ => {
             /* Nothig */
             return Ok(None);
@@ -300,7 +298,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{protocol::ProtocolKit, testutil::BasicSetupDetails, DsaSystem};
+    use crate::{protocol::ProtocolKit, testutil::BasicSetupDetails, CycleVerifyQuery, DsaSystem, StorageStatus, StoreRegistryQuery};
 
 
 
@@ -325,7 +323,7 @@ fn test_server_cycle_happy_path() {
 
     driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())));
 
-    let Some(ServerCycleOutput::VerificationRequest { client_id, new_public_key: _ }) = driver.poll_transmit() else {
+    let Some(ServerCycleOutput::VerificationRequest(CycleVerifyQuery { client_id, new_public_key: _ })) = driver.poll_transmit() else {
         panic!("Expected verification request to be queued");
     };
     assert_eq!(client_id, setup.client_id);
@@ -338,13 +336,13 @@ fn test_server_cycle_happy_path() {
         }
     )));
 
-    let Some(ServerCycleOutput::StorageRequest { client_id, new_public_key: _, time }) = driver.poll_transmit() else {
+    let Some(ServerCycleOutput::StorageRequest(StoreRegistryQuery { client_id, public_key: _, time })) = driver.poll_transmit() else {
         panic!("Expected storage request to be queued");
     };
     assert_eq!(client_id, setup.client_id);
     assert_eq!(time, MsSinceEpoch(10));
 
-    driver.recv(MsSinceEpoch(20), Some(ServerCycleInput::StoreSucess));
+    driver.recv(MsSinceEpoch(20), Some(ServerCycleInput::StoreResponse(StorageStatus::Success)));
     let result = driver.poll_result();
     assert!(matches!(result, std::task::Poll::Ready(Ok(_))));
 }
@@ -366,7 +364,7 @@ fn test_server_cycle_sends_verification_request() {
 
     driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init.clone())));
 
-    let Some(ServerCycleOutput::VerificationRequest { client_id, .. }) = driver.poll_transmit() else {
+    let Some(ServerCycleOutput::VerificationRequest(CycleVerifyQuery { client_id, .. })) = driver.poll_transmit() else {
         panic!("Expected verification request to be queued");
     };
     assert_eq!(client_id, setup.client_id);
@@ -448,7 +446,7 @@ fn test_server_cycle_fails_on_storage_error() {
 
     driver.poll_transmit(); // Skip storage request
 
-    driver.recv(MsSinceEpoch(20), Some(ServerCycleInput::StoreFailure("DB down".to_string())));
+    driver.recv(MsSinceEpoch(20), Some(ServerCycleInput::StoreResponse(StorageStatus::Failure("DB down".to_string()))));
 
     let ServerPollResult::Ready(Err(ServerProtocolError::StoreFailure(reason))) = driver.poll_result() else {
         panic!("Expected storage failure");
@@ -475,11 +473,11 @@ fn test_server_cycle_ignores_after_error() {
     driver.recv(MsSinceEpoch(5), Some(ServerCycleInput::VerificationResponse(CycleVerifyStatus::Other("oops".to_string()))));
 
     // Should now be in error state
-    driver.recv(MsSinceEpoch(10), Some(ServerCycleInput::StoreSucess));
+    driver.recv(MsSinceEpoch(10), Some(ServerCycleInput::StoreResponse(StorageStatus::Success)));
     assert!(matches!(driver.poll_result(), ServerPollResult::Ready(Err(ServerProtocolError::Misc(_)))));
 
     // All future recvs should be ignored
-    driver.recv(MsSinceEpoch(15), Some(ServerCycleInput::StoreSucess));
+    driver.recv(MsSinceEpoch(15), Some(ServerCycleInput::StoreResponse(StorageStatus::Success)));
     assert!(matches!(driver.poll_result(), ServerPollResult::Pending));
 }
 

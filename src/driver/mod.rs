@@ -36,8 +36,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        specials::{FauxChain, FauxKem},
-        testutil::BasicSetupDetails, MsSinceEpoch,
+        specials::{FauxChain, FauxKem}, testutil::BasicSetupDetails, MsSinceEpoch, StoreRegistryQuery, VerifyRequestIntegrityQuery
     };
 
     use super::{ClientDriver, RegistryDriver, RegistryOutput, ServerRegistryDriver, ServerRegistryOutput};
@@ -66,18 +65,18 @@ mod tests {
 
         reg_server_driver.recv(MsSinceEpoch(0), Some(super::ServerRegistryInput::ClientRequest(inner)));
         
-        let ServerRegistryOutput::VerifyRequestIntegrity { requested_id, admin_id, public_key } = reg_server_driver.poll_transmit().unwrap() else {
+        let ServerRegistryOutput::VerifyRequestIntegrity(VerifyRequestIntegrityQuery { requested_id, admin_id, public_key }) = reg_server_driver.poll_transmit().unwrap() else {
             panic!("server did not try to verify the request integrity.");
         };
 
         reg_server_driver.recv(MsSinceEpoch(0),  Some(super::ServerRegistryInput::VerificationResponse(super::VerifyRequestIntegrityResponse::Success { admin_public: setup.admin_pk.clone() })));
 
-        let ServerRegistryOutput::StoreRegistry { client_id, public_key, time } = reg_server_driver.poll_transmit().unwrap() else {
+        let ServerRegistryOutput::StoreRegistry(StoreRegistryQuery { client_id, public_key, time }) = reg_server_driver.poll_transmit().unwrap() else {
             panic!("server did not try to store.");
         };
 
 
-        reg_server_driver.recv(MsSinceEpoch(0), Some(super::ServerRegistryInput::StoreSucess));
+        reg_server_driver.recv(MsSinceEpoch(0), Some(super::ServerRegistryInput::StoreResponse(crate::StorageStatus::Success)));
 
 
         let Poll::Ready(Ok(inner)) = reg_server_driver.poll_result() else {

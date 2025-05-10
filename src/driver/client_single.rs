@@ -11,20 +11,18 @@ use crate::{
 
 use super::ClientRevokeOutput;
 
-pub(crate) struct ClientSingleDriver<C, CO, REQ, RES>
-{
+pub(crate) struct ClientSingleDriver<C, CO, REQ, RES> {
     inner: ClientSingleDriverInner<C, CO, REQ, RES>,
     state: DriverState<CO>,
-    _res: PhantomData<RES>
+    _res: PhantomData<RES>,
 }
 
-struct ClientSingleDriverInner<C, CO, REQ, RES>
-{
+struct ClientSingleDriverInner<C, CO, REQ, RES> {
     context: C,
     buffer: ConstGenericRingBuffer<REQ, 1>,
     terminated: bool,
     init_fn: fn(&mut C) -> Result<(REQ, CO), ClientProtocolError>,
-    resp_fn: fn(RES, &mut C, &mut CO) -> Result<(), ClientProtocolError>
+    resp_fn: fn(RES, &mut C, &mut CO) -> Result<(), ClientProtocolError>,
 }
 
 // pub enum ClientDeregisterOutput<S, const N: usize>
@@ -34,8 +32,7 @@ struct ClientSingleDriverInner<C, CO, REQ, RES>
 //     Request(ClientDeregister<S::Signature, N>)
 // }
 
-pub(crate) enum ClientSingleInput<RES>
-{
+pub(crate) enum ClientSingleInput<RES> {
     Response(RES),
     ErrorResponse(ServerErrorResponse),
 }
@@ -50,12 +47,11 @@ enum DriverState<CO> {
     Finished,
 }
 
-impl<C, CO, REQ, RES> ClientSingleDriver<C, CO, REQ,  RES>
-{
+impl<C, CO, REQ, RES> ClientSingleDriver<C, CO, REQ, RES> {
     pub fn new(
         context: C,
         init_fn: fn(&mut C) -> Result<(REQ, CO), ClientProtocolError>,
-        resp_fn: fn(RES, &mut C, &mut CO) -> Result<(), ClientProtocolError>
+        resp_fn: fn(RES, &mut C, &mut CO) -> Result<(), ClientProtocolError>,
     ) -> Self {
         Self {
             inner: ClientSingleDriverInner {
@@ -63,10 +59,10 @@ impl<C, CO, REQ, RES> ClientSingleDriver<C, CO, REQ,  RES>
                 buffer: ConstGenericRingBuffer::default(),
                 terminated: false,
                 init_fn,
-                resp_fn
+                resp_fn,
             },
             state: DriverState::Init,
-            _res: PhantomData
+            _res: PhantomData,
         }
     }
 
@@ -111,11 +107,12 @@ impl<C, CO, REQ, RES> ClientSingleDriver<C, CO, REQ,  RES>
 fn recv_internal<C, CO, REQ, RES>(
     obj: &mut ClientSingleDriver<C, CO, REQ, RES>,
     packet: Option<ClientSingleInput<RES>>,
-) -> Result<(), ClientProtocolError>
-{
+) -> Result<(), ClientProtocolError> {
     let state = match &mut obj.state {
         DriverState::Init => handle_registry_init(&mut obj.inner)?,
-        DriverState::WaitingOnServer(context) => handle_registry_done(&mut obj.inner, packet, context)?,
+        DriverState::WaitingOnServer(context) => {
+            handle_registry_done(&mut obj.inner, packet, context)?
+        }
         _ => None, // The other states do not have any active behaviour.
     };
 
@@ -128,10 +125,8 @@ fn recv_internal<C, CO, REQ, RES>(
 }
 
 fn handle_registry_init<C, CO, REQ, RES>(
-   obj: &mut ClientSingleDriverInner<C, CO, REQ, RES>
-) -> Result<Option<DriverState<CO>>, ClientProtocolError>
-{
-
+    obj: &mut ClientSingleDriverInner<C, CO, REQ, RES>,
+) -> Result<Option<DriverState<CO>>, ClientProtocolError> {
     let (request, context) = (obj.init_fn)(&mut obj.context)?;
     obj.buffer.enqueue(request);
 
@@ -142,8 +137,7 @@ fn handle_registry_done<C, CO, REQ, RES>(
     obj: &mut ClientSingleDriverInner<C, CO, REQ, RES>,
     packet: Option<ClientSingleInput<RES>>,
     context: &mut CO,
-) -> Result<Option<DriverState<CO>>, ClientProtocolError>
-{
+) -> Result<Option<DriverState<CO>>, ClientProtocolError> {
     let Some(packet) = packet else {
         return Ok(None);
     };

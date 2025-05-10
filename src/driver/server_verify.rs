@@ -6,9 +6,7 @@ use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 use uuid::Uuid;
 
 use crate::{
-    DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerProtocolError,
-    TokenValidityInterval, ViewBytes,
-    token::{Final, Token},
+    token::{Final, Token}, CheckTokenQuery, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerProtocolError, TokenValidityInterval, ViewBytes
 };
 
 use super::{ServerPollResult, ServerTokenDriverInner, ServerTokenInput};
@@ -45,22 +43,22 @@ pub enum ServerVerifyOutput<const N: usize> {
     /// 2. the token is not in a revocation list.
     /// 3. the token is in the database.
     /// 4. The permissions are good
-    CheckToken {
-        client_id: Uuid,
-        array: BitArray<[u8; 16]>,
-        token_hash: [u8; N],
-    },
+    CheckToken(CheckTokenQuery<N>),
+}
+
+pub enum CheckTokenStatus {
+    Valid,
+    InvalidClientUuid,
+    Expired,
+    Revoked,
+    Forbidden,
+    NonExistent,
+    Failure(String)
 }
 
 pub enum ServerVerifyInput {
     Request(Token<Final>),
-    VerifySuccess,
-    PermissionFailure(String),
-    InRevocationList,
-    InvalidClientUuid,
-    TokenExpired,
-    TokenNotInDatabase,
-    OtherFailure(String),
+    TokenResponse(CheckTokenStatus)
 }
 
 impl<H, const N: usize> ServerVerifyDriver<H, N>
@@ -158,11 +156,11 @@ where
             }
 
             // We have received a request, we now broadcast a request to the server.
-            inner.buffer.enqueue(ServerVerifyOutput::CheckToken {
+            inner.buffer.enqueue(ServerVerifyOutput::CheckToken(CheckTokenQuery {
                 client_id: token.id,
                 array: token.permissions.clone(),
                 token_hash: H::hash(&token.view()),
-            });
+            }));
 
             // Wait for the request to verify now.
             Ok(Some(DriverState::WaitingForRequestVerification(Some(
@@ -186,19 +184,20 @@ where
     };
 
     match packet {
-        ServerVerifyInput::VerifySuccess => {
-            // The token is good, we are done.
+
+        ServerVerifyInput::TokenResponse(token_res) => match token_res {
+            CheckTokenStatus::Valid => {
+                // The token is good, we are done.
             inner.terminated = true;
             Ok(Some(DriverState::Finished(token_wrapper.take())))
+            },
+            CheckTokenStatus::Revoked => Err(ServerProtocolError::TokenInRevocationList),
+            CheckTokenStatus::InvalidClientUuid => Err(ServerProtocolError::InvalidClientUuid),
+            CheckTokenStatus::Expired => Err(ServerProtocolError::TokenExpired),
+            CheckTokenStatus::NonExistent => Err(ServerProtocolError::TokenDoesNotExist),
+            CheckTokenStatus::Forbidden => Err(ServerProtocolError::TokenPermissionError),
+            CheckTokenStatus::Failure(reason) => Err(ServerProtocolError::Misc(reason))
         }
-        ServerVerifyInput::InRevocationList => Err(ServerProtocolError::TokenInRevocationList),
-        ServerVerifyInput::InvalidClientUuid => Err(ServerProtocolError::InvalidClientUuid),
-        ServerVerifyInput::TokenExpired => Err(ServerProtocolError::TokenExpired),
-        ServerVerifyInput::TokenNotInDatabase => Err(ServerProtocolError::TokenDoesNotExist),
-        ServerVerifyInput::PermissionFailure(reason) => {
-            Err(ServerProtocolError::TokenPermissionError(reason))
-        }
-        ServerVerifyInput::OtherFailure(reason) => Err(ServerProtocolError::Misc(reason)),
         _ => Ok(None), // do nothing.
     }
 }
@@ -212,7 +211,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        token::{Final, Pending, Token}, HashingAlgorithm, MsSinceEpoch, ServerProtocolError, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput, TokenValidityInterval, ViewBytes
+        token::{Final, Pending, Token}, CheckTokenQuery, HashingAlgorithm, MsSinceEpoch, ServerProtocolError, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput, TokenValidityInterval, ViewBytes
     };
 
     #[test]
@@ -227,18 +226,18 @@ mod tests {
         let output = driver.poll_transmit();
 
         match output {
-            Some(ServerVerifyOutput::CheckToken {
+            Some(ServerVerifyOutput::CheckToken(CheckTokenQuery {
                 client_id,
                 token_hash,
                 ..
-            }) => {
+            })) => {
                 assert_eq!(client_id, token.id);
                 assert_eq!(token_hash, Sha3_256::hash(&token.view()));
             }
             _ => panic!("Expected CheckToken output"),
         }
 
-        driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::VerifySuccess));
+        driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::TokenResponse(super::CheckTokenStatus::Valid)));
 
         match driver.poll_result() {
             Poll::Ready(Ok(t)) => assert_eq!(t.view(), token.view()),
@@ -255,7 +254,7 @@ fn test_verify_driver_token_in_revocation_list() {
     driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token.clone())));
     driver.poll_transmit(); // consume CheckToken
 
-    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::InRevocationList));
+    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::TokenResponse(super::CheckTokenStatus::Revoked)));
 
     match driver.poll_result() {
         Poll::Ready(Err(e)) => assert!(matches!(e, ServerProtocolError::TokenInRevocationList)),
@@ -272,7 +271,7 @@ fn test_verify_driver_invalid_uuid() {
     driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
     driver.poll_transmit();
 
-    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::InvalidClientUuid));
+    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::TokenResponse(super::CheckTokenStatus::InvalidClientUuid)));
 
     match driver.poll_result() {
         Poll::Ready(Err(e)) => match e {
@@ -292,7 +291,7 @@ fn test_verify_driver_token_expired() {
     driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
     driver.poll_transmit();
 
-    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::TokenExpired));
+    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::TokenResponse(super::CheckTokenStatus::Expired)));
 
     match driver.poll_result() {
         Poll::Ready(Err(e)) => match e {
@@ -313,7 +312,7 @@ fn test_verify_driver_token_not_in_db() {
     driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
     driver.poll_transmit();
 
-    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::TokenNotInDatabase));
+    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::TokenResponse(super::CheckTokenStatus::NonExistent)));
 
     match driver.poll_result() {
         Poll::Ready(Err(e)) => match e {
@@ -332,11 +331,11 @@ fn test_verify_driver_permission_failure() {
     driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
     driver.poll_transmit();
 
-    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::PermissionFailure("denied".into())));
+    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::TokenResponse(super::CheckTokenStatus::Forbidden)));
 
     match driver.poll_result() {
         Poll::Ready(Err(e)) => match e {
-            ServerProtocolError::TokenPermissionError(reason) => assert_eq!(reason, "denied"),
+            ServerProtocolError::TokenPermissionError => {},
             _ => panic!("Expected TokenPermissionError"),
         },
         _ => panic!("Expected error result"),
@@ -352,7 +351,7 @@ fn test_verify_driver_other_failure() {
     driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
     driver.poll_transmit();
 
-    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::OtherFailure("unexpected".into())));
+    driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::TokenResponse(super::CheckTokenStatus::Failure("unexpected".into()))));
 
     match driver.poll_result() {
         Poll::Ready(Err(e)) => match e {

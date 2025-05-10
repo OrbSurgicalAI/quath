@@ -3,70 +3,60 @@ use std::{marker::PhantomData, task::Poll};
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use uuid::Uuid;
 
-use crate::{protocol::ProtocolKit, ClientDeregister, ClientProtocolError, DsaSystem, HashingAlgorithm, KemAlgorithm, ServerDeregister, ServerErrorResponse};
+use crate::{
+    ClientDeregister, ClientProtocolError, DsaSystem, HashingAlgorithm, KemAlgorithm,
+    ServerDeregister, ServerErrorResponse, protocol::ProtocolKit,
+};
 
-use super::ClientRevokeOutput;
-
-
+use super::{ClientRevokeOutput, ClientSingleDriver, ClientSingleInput};
 
 pub struct ClientDeregisterDriver<S, K, H, const N: usize>
 where
     S: DsaSystem,
     K: KemAlgorithm,
-    H: HashingAlgorithm<N>
+    H: HashingAlgorithm<N>,
 {
-    inner: ClientDeregisterDriverInner<S, K, H, N>,
-    state: DriverState
+    inner: ClientSingleDriver<
+        DegisterCtx<S>,
+        (),
+        ClientDeregister<S::Signature, N>,
+        ServerDeregister<S::Signature, N>,
+    >,
+    _k: PhantomData<K>,
+    _h: PhantomData<H>,
 }
 
-
-struct ClientDeregisterDriverInner<S, K, H, const N: usize>
-where 
+struct DegisterCtx<S>
+where
     S: DsaSystem,
-    K: KemAlgorithm,
-    H: HashingAlgorithm<N>
 {
     target: Uuid,
     claimant_id: Uuid,
     claimant_sk: S::Private,
     server_pk: S::Public,
-    buffer: ConstGenericRingBuffer<ClientDeregisterOutput<S, N>, 1>,
-    terminated: bool,
-    _k: PhantomData<K>,
-    _h: PhantomData<H>
-
 }
 
 pub enum ClientDeregisterOutput<S, const N: usize>
-where 
-    S: DsaSystem
+where
+    S: DsaSystem,
 {
-    Request(ClientDeregister<S::Signature, N>)
+    Request(ClientDeregister<S::Signature, N>),
 }
 
 pub enum ClientDeregisterInput<S, const N: usize>
-where 
-    S: DsaSystem
+where
+    S: DsaSystem,
 {
     Response(ServerDeregister<S::Signature, N>),
-    ErrorResponse(ServerErrorResponse)
-}
-
-enum DriverState {
-    Init,
-    WaitingOnServer,
-    Errored(Option<ClientProtocolError>),
-    ErrorResponse(Option<ServerErrorResponse>),
-    Vacant,
-    Finished
+    ErrorResponse(ServerErrorResponse),
 }
 
 
 impl<S, K, H, const N: usize> ClientDeregisterDriver<S, K, H, N>
-where 
+where
     S: DsaSystem,
     K: KemAlgorithm,
-    H: HashingAlgorithm<N>
+    H: HashingAlgorithm<N>,
 {
     pub fn new(
         target: Uuid,
@@ -74,132 +64,75 @@ where
         claimant_sk: S::Private,
         server_pk: S::Public,
     ) -> Self {
-
         Self {
-            inner: ClientDeregisterDriverInner { 
-                target,
-                claimant_id,
-                claimant_sk,
-                server_pk,
-                buffer: ConstGenericRingBuffer::default(),
-                terminated: false,
-                _h: PhantomData,
-                _k: PhantomData
-            },
-            state: DriverState::Init
+            inner: ClientSingleDriver::new(
+                DegisterCtx {
+                    target,
+                    claimant_id,
+                    claimant_sk,
+                    server_pk,
+                },
+                init_function::<S, K, H, N>,
+                done_function::<S, K, H, N>,
+            ),
+            _h: PhantomData,
+            _k: PhantomData,
         }
-        
     }
 
     pub fn recv(&mut self, packet: Option<ClientDeregisterInput<S, N>>) {
-        if self.inner.terminated {
-            return;
-        }
-
-        match recv_internal(self, packet) {
-            Ok(_) => { /* Nothing to do */ }
-            Err(e) => {
-                self.inner.terminated = true;
-                self.state = DriverState::Errored(Some(e))
-            }
-        }
+        self.inner.recv(match packet {
+            Some(inner) => Some(match inner {
+                ClientDeregisterInput::ErrorResponse(respo) => ClientSingleInput::ErrorResponse(respo),
+                ClientDeregisterInput::Response(respo) => ClientSingleInput::Response(respo)
+             }),
+            None => None
+        });
     }
 
     pub fn poll_transmit(&mut self) -> Option<ClientDeregisterOutput<S, N>> {
-        self.inner.buffer.dequeue()
+        Some(ClientDeregisterOutput::Request(self.inner.poll_transmit()?))
     }
     pub fn poll_result(&mut self) -> Poll<Result<(), ClientProtocolError>> {
-        match &mut self.state {
-            DriverState::Errored(inner) => {
-                let value = inner.take().unwrap();
-                self.state = DriverState::Vacant;
-                Poll::Ready(Err(value))
-            },
-            DriverState::Finished => {
-                self.state = DriverState::Vacant;
-                Poll::Ready(Ok(()))
-            },
-            DriverState::ErrorResponse(response) => {
-                let value = response.take().unwrap();
-                self.state = DriverState::Vacant;
-                Poll::Ready(Err(ClientProtocolError::ServerErrorResponse(value)))
-            }
-            _ => Poll::Pending
-        }
+        self.inner.poll_result()
     }
 }
 
+fn init_function<S, K, H, const N: usize>(
+    ctx: &mut DegisterCtx<S>,
+) -> Result<(ClientDeregister<S::Signature, N>, ()), ClientProtocolError>
+where
+    S: DsaSystem,
+    K: KemAlgorithm,
+    H: HashingAlgorithm<N>,
+{
+    Ok((
+        ProtocolKit::<S, K, H, N>::client_deregister_init(
+            ctx.target,
+            ctx.claimant_id,
+            &ctx.claimant_sk,
+        )?,
+        (),
+    ))
+}
 
-
-fn recv_internal<S, K, H, const N: usize>(
-    obj: &mut ClientDeregisterDriver<S, K, H, N>,
-    packet: Option<ClientDeregisterInput<S, N>>,
+fn done_function<S, K, H, const N: usize>(
+    response: ServerDeregister<S::Signature, N>,
+    ctx: &mut DegisterCtx<S>,
+    _: &mut (),
 ) -> Result<(), ClientProtocolError>
 where
     S: DsaSystem,
     K: KemAlgorithm,
     H: HashingAlgorithm<N>,
 {
-    let state = match &mut obj.state {
-        DriverState::Init => handle_registry_init(&mut obj.inner, packet)?,
-        DriverState::WaitingOnServer => handle_registry_done(&mut obj.inner, packet)?,
-        _ => None, // The other states do not have any active behaviour.
-    };
-
-    if let Some(inner) = state {
-        // If we output a new state, use said state.
-        obj.state = inner;
-    }
-
-    Ok(())
+    ProtocolKit::<S, K, H, N>::client_deregister_finish(
+        ctx.target,
+        ctx.claimant_id,
+        &response,
+        &ctx.server_pk,
+    )
 }
-
-
-
-fn handle_registry_init<S, K, H, const N: usize>(
-    inner: &mut ClientDeregisterDriverInner<S, K, H, N>,
-    packet: Option<ClientDeregisterInput<S, N>>,
-) -> Result<Option<DriverState>, ClientProtocolError>
-where
-    S: DsaSystem,
-    K: KemAlgorithm,
-    H: HashingAlgorithm<N>,
-{
-
-    let request= ProtocolKit::<S, K, H, N>::client_deregister_init(inner.target, inner.claimant_id, &inner.claimant_sk)?;
-    // Send out this request.
-    inner.buffer.enqueue(ClientDeregisterOutput::Request(request));
-    
-    Ok(Some(DriverState::WaitingOnServer))
-}
-
-fn handle_registry_done<S, K, H, const N: usize>(
-    inner: &mut ClientDeregisterDriverInner<S, K, H, N>,
-    packet: Option<ClientDeregisterInput<S, N>>
-) -> Result<Option<DriverState>, ClientProtocolError>
-where
-    S: DsaSystem,
-    K: KemAlgorithm,
-    H: HashingAlgorithm<N>,
-{
-    let Some(packet) = packet else {
-        return Ok(None);
-    };
-
-    match packet {
-        ClientDeregisterInput::Response(response) => {
-            
-            ProtocolKit::<S, K, H, N>::client_deregister_finish(inner.target, inner.claimant_id, &response, &inner.server_pk)?;
-
-            
-            Ok(Some(DriverState::Finished))
-        }
-        ClientDeregisterInput::ErrorResponse(error) => Ok(Some(DriverState::ErrorResponse(Some(error)))),
-    }
-}
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -208,24 +141,24 @@ mod tests {
     use sha3::Sha3_256;
     use uuid::Uuid;
 
-    use crate::{protocol::ProtocolKit, specials::{FauxChain, FauxKem}, testutil::BasicSetupDetails, DsaSystem};
+    use crate::{
+        DsaSystem,
+        protocol::ProtocolKit,
+        specials::{FauxChain, FauxKem},
+        testutil::BasicSetupDetails,
+    };
 
     use super::{ClientDeregisterDriver, ClientDeregisterInput, ClientDeregisterOutput};
 
-
     #[test]
     pub fn test_deregister_happy_path() {
-
         let setup = BasicSetupDetails::<FauxChain>::new();
 
         let target_id = Uuid::new_v4();
         let (c_pk, c_sk) = FauxChain::generate().unwrap();
         let (s_pk, s_sk) = FauxChain::generate().unwrap();
         let mut driver = ClientDeregisterDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
-            target_id,
-            target_id,
-            c_sk,
-            s_pk
+            target_id, target_id, c_sk, s_pk,
         );
 
         driver.recv(None);
@@ -235,22 +168,15 @@ mod tests {
             panic!("Failed to extract the request from the transmit poll.");
         };
 
-
         let response = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::server_deregister(
-            &request,
-            &c_pk,
-            &s_sk
-        ).unwrap();
+            &request, &c_pk, &s_sk,
+        )
+        .unwrap();
 
         driver.recv(Some(ClientDeregisterInput::Response(response)));
-
 
         let Poll::Ready(Ok(())) = driver.poll_result() else {
             panic!("Polled to wrong sate.");
         };
-
-
-
-  
     }
 }
