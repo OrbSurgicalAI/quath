@@ -19,7 +19,7 @@ pub use simple::*;
 pub use time::*;
 
 
-pub trait Signature: ViewBytes + for<'a> Parse<'a> {}
+pub trait Signature: ViewBytes + for<'a> Parse<'a> + Clone {}
 
 
 pub trait FixedByteRepr<const N: usize> {
@@ -65,7 +65,7 @@ pub trait HashingAlgorithm<const N: usize> {
     fn hash_sequence(buffer: &[&[u8]]) -> [u8; N];
 }
 
-pub trait KEMAlgorithm {
+pub trait KemAlgorithm {
     type DecapsulationKey;
     type EncapsulationKey: ViewBytes + for<'a> Parse<'a>;
     type CipherText: ViewBytes + for<'a> Parse<'a>;

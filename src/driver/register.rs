@@ -4,7 +4,7 @@ use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use uuid::Uuid;
 
 use crate::core::crypto::{
-    protocol::ProtocolKit, ClientProtocolError, ClientRegisterInit, DsaSystem, HashingAlgorithm, KEMAlgorithm, ServerProtocolError, ServerRegister
+    protocol::ProtocolKit, ClientProtocolError, ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm, ServerProtocolError, ServerRegister
 };
 
 /// Represents the protocol execution for registration in a SANS/IO manner.
@@ -60,7 +60,7 @@ use crate::core::crypto::{
 pub struct RegistryDriver<S, K, H, const HS: usize>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     inner: RegistryDriverInner<S, K, H, HS>,
     state: DriverState<S>,
@@ -108,7 +108,7 @@ where
 struct RegistryDriverInner<S, K, H, const HS: usize>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     admin_id: Uuid,
     admin_private: Option<S::Private>,
@@ -122,7 +122,7 @@ where
 impl<S, K, H, const HS: usize> RegistryDriver<S, K, H, HS>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     /// Creates a new [RegistryDriver] with the ID and the private key.
@@ -179,7 +179,7 @@ fn recv_internal<S, K, H, const HS: usize>(
 ) -> Result<(), ClientProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     if let Some(RegistryInput::UuidNotUnique) = packet {
@@ -208,7 +208,7 @@ fn handle_registry_init<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S>>, ClientProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     let (request, new_private) = ProtocolKit::<S, K, H, HS>::client_register_init(
@@ -232,7 +232,7 @@ fn handle_registry_pending<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S>>, ClientProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
 

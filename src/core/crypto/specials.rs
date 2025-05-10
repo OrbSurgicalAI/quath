@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use rand::Rng;
 
-use super::{DsaSystem, FixedByteRepr, KEMAlgorithm, Parse, PrivateKey, PublicKey, Signature, ViewBytes};
+use super::{DsaSystem, FixedByteRepr, KemAlgorithm, Parse, PrivateKey, PublicKey, Signature, ViewBytes};
 
 
 
@@ -174,7 +174,7 @@ impl FixedByteRepr<32> for FauxSharedSecret {
 
 pub struct FauxKem;
 
-impl KEMAlgorithm for FauxKem {
+impl KemAlgorithm for FauxKem {
     type DecapsulationKey = FauxDecapKey;
     type EncapsulationKey = FauxEncapKey;
     type CipherText = FauxCipherText;

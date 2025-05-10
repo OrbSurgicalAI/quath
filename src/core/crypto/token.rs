@@ -4,7 +4,7 @@ use bitvec::{array::BitArray, order::Lsb0};
 use rand::Rng;
 use uuid::Uuid;
 
-use super::{FixedByteRepr, KEMAlgorithm, MsSinceEpoch, Parse, ViewBytes};
+use super::{FixedByteRepr, KemAlgorithm, MsSinceEpoch, Parse, ViewBytes};
 
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,9 +103,22 @@ impl Token<Pending> {
         &mut self.permissions
     }
 
+    #[cfg(test)]
+    pub fn finalize(self) -> Token<Final> {
+        Token {
+            id: self.id,
+            protocol: self.protocol,
+            sub_protocol: self.sub_protocol,
+            body: self.body.clone(),
+            permissions: self.permissions,
+            _state: PhantomData,
+            timestamp: self.timestamp
+        }
+    }
+
     pub fn update_with_shared_secret<K>(&self, ss: K::SharedSecret) -> Token<Final>
     where 
-        K: KEMAlgorithm,
+        K: KemAlgorithm,
         K::SharedSecret: FixedByteRepr<32>
     {
 

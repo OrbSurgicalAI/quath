@@ -2,6 +2,12 @@ mod client;
 mod register;
 mod server_register;
 mod server_cycle;
+mod server_token;
+mod server_verify;
+mod server_revoke;
+mod server_deregister;
+mod client_revoke;
+
 
 use std::task::Poll;
 
@@ -9,6 +15,11 @@ pub use client::*;
 pub use register::*;
 pub use server_register::*;
 pub use server_cycle::*;
+pub use server_token::*;
+pub use server_verify::*;
+pub use server_revoke::*;
+pub use server_deregister::*;
+pub use client_revoke::*;
 
 use crate::ServerProtocolError;
 

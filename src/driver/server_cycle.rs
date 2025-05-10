@@ -3,7 +3,7 @@ use std::{marker::PhantomData, task::Poll};
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 use uuid::Uuid;
 
-use crate::{protocol::ProtocolKit, CycleInit, DsaSystem, HashingAlgorithm, KEMAlgorithm, MsSinceEpoch, ServerCycle, ServerProtocolError};
+use crate::{protocol::ProtocolKit, CycleInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerProtocolError};
 
 use super::ServerPollResult;
 
@@ -40,7 +40,7 @@ use super::ServerPollResult;
 pub struct ServerCycleDriver<S, K, H, const N: usize>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     inner: ServerCycleDriverInner<S, K, H, N>,
     state: DriverState<S, N>
@@ -49,7 +49,7 @@ where
 pub struct ServerCycleDriverInner<S, K, H, const N: usize>
 where 
     S: DsaSystem,
-    K: KEMAlgorithm
+    K: KemAlgorithm
 {
     server_sk: S::Private,
     buffer: GrowableAllocRingBuffer<ServerCycleOutput<S>>,
@@ -99,7 +99,7 @@ where
     Other(String)
 }
 
-pub enum DriverState<S, const N: usize> 
+enum DriverState<S, const N: usize> 
 where 
     S: DsaSystem
 {
@@ -115,7 +115,7 @@ where
 impl<S, K, H, const N: usize> ServerCycleDriver<S, K, H, N>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<N>,
 {
     pub fn new(server_sk: S::Private) -> Self {
@@ -182,13 +182,13 @@ fn recv_internal<S, K, H, const N: usize>(
 ) -> Result<(), ServerProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<N>,
 {
     let state = match &mut obj.state {
         DriverState::Init => handle_registry_init(&mut obj.inner, packet)?,
        DriverState::WaitingForRequestVerification(inner) => handle_verification(&mut obj.inner, packet, &inner, current_time)?,
-       DriverState::ServerStore(inner) => handle_store_wait(packet, inner)?,
+       DriverState::ServerStore(inner) => handle_store_wait(&mut obj.inner, packet, inner)?,
         DriverState::Errored(_) => None,
         DriverState::Finished(_) => None,
         DriverState::Vacant => None,
@@ -209,7 +209,7 @@ fn handle_registry_init<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S, HS>>, ServerProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     // We only want to proceed if the packet is not none.
@@ -240,7 +240,7 @@ fn handle_verification<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S, HS>>, ServerProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     // We only want to proceed if the packet is not none.
@@ -273,7 +273,10 @@ fn handle_store_wait<S, K, H, const HS: usize>(
     resp: &mut Option<ServerCycle<HS, S::Signature>>
 ) -> Result<Option<DriverState<S, HS>>, ServerProtocolError>
 where
-    S: DsaSystem
+    
+    S: DsaSystem,
+    K: KemAlgorithm,
+    H: HashingAlgorithm<HS>
 {
     // We only want to proceed if the packet is not none.
     let Some(packet) = packet else {
@@ -481,6 +484,26 @@ fn test_server_cycle_ignores_after_error() {
 }
 
 
+#[test]
+fn test_server_cycle_result_pending_if_incomplete() {
+    use crate::{ServerCycleDriver, ServerCycleInput, ServerPollResult, MsSinceEpoch};
+    use crate::core::crypto::specials::{FauxChain, FauxKem};
+    use sha3::Sha3_256;
+
+    const N: usize = 32;
+    type Driver = ServerCycleDriver<FauxChain, FauxKem, Sha3_256, N>;
+
+    let setup = BasicSetupDetails::<FauxChain>::new();
+    let mut driver = Driver::new(setup.server_sk.clone());
+
+    let (_, old_sk) = FauxChain::generate().unwrap();
+    let (cycle_init, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, N>::client_cycle_init(setup.client_id, &old_sk).unwrap();
+
+    driver.recv(MsSinceEpoch(0), Some(ServerCycleInput::ReceiveRequest(cycle_init)));
+
+    let result = driver.poll_result();
+    assert!(matches!(result, ServerPollResult::Pending));
+}
 
 
 }

@@ -25,8 +25,76 @@ pub enum ServerProtocolError {
     #[error("Miscelleaneous error.")]
     Misc(String),
     #[error("Failed to store the key.")]
-    StoreFailure(String)
+    StoreFailure(String),
+    #[error("The client requires a cycle as the key has expired.")]
+    CycleRequired,
+    #[error("The token is in a revocation list.")]
+    TokenInRevocationList,
+    #[error("This token has already been stamped. It is now being revoked.")]
+    TokenDuplicate,
+    #[error("Invalid client UUID, does not exist.")]
+    InvalidClientUuid,
+    #[error("Token was expired.")]
+    TokenExpired,
+    #[error("Token does not exist, could not verify.")]
+    TokenDoesNotExist,
+    #[error("Server could not verify the permission string.")]
+    TokenPermissionError(String),
+    #[error("Failed to verify token revocation request")]
+    FailedToVerifyRevocationRequest,
+    #[error("Failed to verify the signature on the hash sent for authenticating the deregistering request.")]
+    FailedToVerifyDeregisterHash,
+    #[error("The request to revoke a token was unauthorized.")]
+    UnauthorizedTokenRequest,
+    #[error("The request to revoke a token was unauthorized.")]
+    UnauthorizedDeregisterRequest,
+    #[error("The claimant behind the revocation request could not be located and thus serviced.")]
+    RevocationClaimantNotFound,
+    #[error("Internal error relating to database")]
+    MalformedPkFetch,
+    #[error("Deregisterd")]
+    DeregistrationClaimantNotFound,
+    #[error("Deregistration target not found.")]
+    DeregstrationUnchanged,
+    #[error("error in deregisterd")]
+    DeregistrationError(String)
 }
+impl ServerProtocolError {
+    pub fn error_name(&self) -> &'static str {
+        match self {
+            Self::FailedToVerifyTokenSignature => "FailedToVerifyTokenSignature",
+            Self::EncapsulationFailed => "EncapsulationFailed",
+            Self::FailedToSignResponse => "FailedToSignResponse",
+            Self::FailedToVerifyNewCycleKey => "FailedToVerifyNewCycleKey",
+            Self::FailedToVerifyOldKeyDuringCycle => "FailedToVerifyOldKeyDuringCycle",
+            Self::FailedToVerifyKProof => "FailedToVerifyKProof",
+            Self::FailedToVerifyAProof => "FailedToVerifyAProof",
+            Self::TokenOutOfInterval => "TokenOutOfInterval",
+            Self::NoAdminFound => "NoAdminFound",
+            Self::UuidTaken => "UuidTaken",
+            Self::PublicKeyNotUnique => "PublicKeyNotUnique",
+            Self::Misc(_) => "Misc",
+            Self::StoreFailure(_) => "StoreFailure",
+            Self::CycleRequired => "CycleRequired",
+            Self::TokenInRevocationList => "TokenInRevocationList",
+            Self::TokenDuplicate => "TokenDuplicate",
+            Self::InvalidClientUuid => "InvalidClientUuid",
+            Self::TokenExpired => "TokenExpired",
+            Self::TokenDoesNotExist => "TokenDoesNotExist",
+            Self::TokenPermissionError(_) => "TokenPermissionError",
+            Self::FailedToVerifyRevocationRequest => "FailedToVerifyRevocationRequest",
+            Self::FailedToVerifyDeregisterHash => "FailedToVerifyDeregisterHash",
+            Self::UnauthorizedTokenRequest => "UnauthorizedTokenRequest",
+            Self::RevocationClaimantNotFound => "RevocationClaimantNotFound",
+            Self::MalformedPkFetch => "MalformedPkFetch",
+            Self::DeregistrationClaimantNotFound => "DeregistrationClaimantNotFound",
+            Self::UnauthorizedDeregisterRequest => "UnauthorizedDeregisterRequest",
+            Self::DeregstrationUnchanged => "DeregstrationUnchanged",
+            Self::DeregistrationError(_) => "DeregistrationError"
+        }
+    }
+}
+
 
 #[derive(thiserror::Error, Debug)]
 pub enum ClientProtocolError {
@@ -55,7 +123,17 @@ pub enum ClientProtocolError {
     #[error("Failed to verify the approval hash, as in, the exact hash was not reconstructed on the client end.")]
     FailedToReconstructApprovalHash,
     #[error("Server protocol failure.")]
-    ServerError(#[from] ServerProtocolError)
+    ServerError(#[from] ServerProtocolError),
+    #[error("Failed to sign a revocation request with the provided key.")]
+    FailedToSignRevokeRequest,
+    #[error("Failed to validate the hash sent back to confirm revocation")]
+    FailedToValidateRevocationHash,
+    #[error("Failed to authenticate revocation response.")]
+    FailedToAuthenticateRevocationResponse,
+    #[error("The server sent back a deregistration hash, but it did not correspond to the calculated hash on the client end.")]
+    FailedToVerifyDeregisterHash,
+    #[error("Failed to authenticate server response for the deregister message.")]
+    FailedToAuthenticateDeregisterResponse
 }
 
 

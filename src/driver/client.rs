@@ -4,7 +4,7 @@ use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use uuid::Uuid;
 
 use crate::core::crypto::{
-    ClientProtocolError, ClientToken, CycleInit, DsaSystem, HashingAlgorithm, KEMAlgorithm,
+    ClientProtocolError, ClientToken, CycleInit, DsaSystem, HashingAlgorithm, KemAlgorithm,
     MsSinceEpoch, ServerCycle, ServerToken,
     protocol::ProtocolKit,
     token::{Final, Pending, Token},
@@ -58,7 +58,7 @@ use crate::core::crypto::{
 pub struct ClientDriver<S, K, H, const HS: usize>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     inner: ClientDriverInner<S, K, H, HS>,
     state: DriverState<S, K>,
@@ -67,7 +67,7 @@ where
 struct ClientDriverInner<S, K, H, const HS: usize>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     id: Uuid,
     private: S::Private,
@@ -84,7 +84,7 @@ where
 enum DriverState<S, K>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     Init,
     AcquiringToken {
@@ -102,7 +102,7 @@ where
 pub enum ClientInput<S, K, const HS: usize>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     ServerPublicChange(S::Public),
     TokenResponseSuccess(ServerToken<HS, K, S::Signature>),
@@ -116,7 +116,7 @@ where
 pub enum ClientOutput<S, K>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     TokenRequest(ClientToken<S::Signature, K>),
     StoreNewCycleKey((S::Public, S::Private)),
@@ -145,7 +145,7 @@ impl ProtocolSpec {
 impl<S, K, H, const HS: usize> ClientDriver<S, K, H, HS>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     /// Creates a new [ClientDriver] with the ID and the
@@ -225,7 +225,7 @@ where
 fn recv_internal<S, K, H, const HS: usize>(obj: &mut ClientDriver<S, K, H, HS>, time: MsSinceEpoch, packet: Option<ClientInput<S, K, HS>>) -> Result<(), ClientProtocolError>
 where 
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 
 {
@@ -269,7 +269,7 @@ fn handle_client_init_state<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S, K>>, ClientProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
 
@@ -312,7 +312,7 @@ fn handle_acquiring_token_state<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S, K>>, ClientProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     let Some(packet) = packet else {
@@ -355,7 +355,7 @@ fn handle_client_cycle_init<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S, K>>, ClientProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     // perform the cycle request.
@@ -390,7 +390,7 @@ fn handle_client_cycle_pending<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S, K>>, ClientProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     let Some(packet) = packet else {

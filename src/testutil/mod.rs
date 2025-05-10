@@ -3,7 +3,7 @@ use std::{fmt::Debug, time::Duration};
 use arbitrary::Arbitrary;
 use uuid::Uuid;
 
-use crate::{core::crypto::{DsaSystem, PrivateKey, PublicKey}, KEMAlgorithm};
+use crate::{core::crypto::{DsaSystem, PrivateKey, PublicKey}, KemAlgorithm};
 pub const ARBTEST_DURATION: Duration = Duration::from_secs(2);
 
 
@@ -82,7 +82,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::core::crypto::{specials::{FauxChain, FauxKem}, DsaSystem, KEMAlgorithm, PrivateKey, PublicKey};
+    use crate::core::crypto::{specials::{FauxChain, FauxKem}, DsaSystem, KemAlgorithm, PrivateKey, PublicKey};
 
   
 

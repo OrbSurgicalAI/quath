@@ -4,7 +4,7 @@ use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 use uuid::Uuid;
 
 use crate::core::crypto::{
-    ClientRegisterInit, DsaSystem, HashingAlgorithm, KEMAlgorithm, MsSinceEpoch,
+    ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch,
     ServerProtocolError, ServerRegister, protocol::ProtocolKit,
 };
 
@@ -43,7 +43,7 @@ use super::ServerPollResult;
 pub struct ServerRegistryDriver<S, K, H, const N: usize>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     inner: ServerRegistryDriverInner<S, K, H, N>,
     state: DriverState<S, N>,
@@ -110,7 +110,7 @@ where
 struct ServerRegistryDriverInner<S, K, H, const N: usize>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
 {
     server_sk: S::Private,
     buffer: GrowableAllocRingBuffer<ServerRegistryOutput<S, N>>,
@@ -122,7 +122,7 @@ where
 impl<S, K, H, const N: usize> ServerRegistryDriver<S, K, H, N>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<N>,
 {
     pub fn new(server_sk: S::Private) -> Self {
@@ -181,7 +181,7 @@ fn recv_internal<S, K, H, const N: usize>(
 ) -> Result<(), ServerProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<N>,
 {
     let state = match &mut obj.state {
@@ -211,7 +211,7 @@ fn handle_registry_init<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S, HS>>, ServerProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     // We only want to proceed if the packet is not none.
@@ -250,7 +250,7 @@ fn handle_server_regiser_wait_lookup<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S, HS>>, ServerProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     // We only want to proceed if the packet is not none.
@@ -289,7 +289,7 @@ fn handle_server_finalize_registry<S, K, H, const HS: usize>(
 ) -> Result<Option<DriverState<S, HS>>, ServerProtocolError>
 where
     S: DsaSystem,
-    K: KEMAlgorithm,
+    K: KemAlgorithm,
     H: HashingAlgorithm<HS>,
 {
     // We only want to proceed if the packet is not none.

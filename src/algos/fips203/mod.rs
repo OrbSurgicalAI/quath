@@ -56,7 +56,7 @@ macro_rules! gen_fips203_kem_variant {
         
         
 
-        impl KEMAlgorithm for $primary {
+        impl KemAlgorithm for $primary {
             type EncapsulationKey = fips203::$module_name::EncapsKey;
             type DecapsulationKey = fips203::$module_name::DecapsKey;
             type CipherText = fips203::$module_name::CipherText;
@@ -108,7 +108,7 @@ gen_fips203_kem_variant!(MlKem1024, ml_kem_1024);
 mod tests {
 
 
-    use crate::{algos::fips203::MlKem512, core::crypto::KEMAlgorithm};
+    use crate::{algos::fips203::MlKem512, core::crypto::KemAlgorithm};
 
 
 
