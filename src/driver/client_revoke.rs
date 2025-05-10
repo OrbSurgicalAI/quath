@@ -121,6 +121,11 @@ where
                 self.state = DriverState::Vacant;
                 Poll::Ready(Ok(()))
             },
+            DriverState::ErrorResponse(response) => {
+                let value = response.take().unwrap();
+                self.state = DriverState::Vacant;
+                Poll::Ready(Err(ClientProtocolError::ServerErrorResponse(value)))
+            }
             _ => Poll::Pending
         }
     }
@@ -308,8 +313,8 @@ fn test_client_revoke_receives_error_response() {
 
     driver.recv(Some(super::ClientRevokeInput::ErrorResponse(error_response)));
 
-    let Poll::Pending = driver.poll_result() else {
-        panic!("Expected poll_result to stay pending after error response.");
+    let Poll::Ready(Err(_)) = driver.poll_result() else {
+        panic!("Expected poll_result to go to error");
     };
 }
 

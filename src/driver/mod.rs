@@ -7,7 +7,8 @@ mod server_verify;
 mod server_revoke;
 mod server_deregister;
 mod client_revoke;
-
+mod client_deregister;
+mod client_single;
 
 use std::task::Poll;
 
@@ -20,6 +21,8 @@ pub use server_verify::*;
 pub use server_revoke::*;
 pub use server_deregister::*;
 pub use client_revoke::*;
+pub use client_deregister::*;
+pub use client_single::*;
 
 use crate::ServerProtocolError;
 

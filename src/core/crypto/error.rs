@@ -1,3 +1,5 @@
+use super::ServerErrorResponse;
+
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum ServerProtocolError {
     #[error("Failed to verify the signature attached to the token.")]
@@ -133,7 +135,9 @@ pub enum ClientProtocolError {
     #[error("The server sent back a deregistration hash, but it did not correspond to the calculated hash on the client end.")]
     FailedToVerifyDeregisterHash,
     #[error("Failed to authenticate server response for the deregister message.")]
-    FailedToAuthenticateDeregisterResponse
+    FailedToAuthenticateDeregisterResponse,
+    #[error("Server error response")]
+    ServerErrorResponse(ServerErrorResponse)
 }
 
 

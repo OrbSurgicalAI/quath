@@ -179,7 +179,8 @@ where
     pub proof: B64<S>
 }
 
-#[derive(Clone)]
+
+#[derive(Debug, Clone)]
 #[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ServerErrorResponse
 {
