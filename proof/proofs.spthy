@@ -1,0 +1,1500 @@
+theory Fluid begin
+
+// Function signature and definition of the equational theory E
+
+builtins: natural-numbers
+functions: adec/2, aenc/2, fst/1, h/1, kemdecaps/3, kemencaps/3,
+           kempk/2, pair/2, pk/1, sdec/2, senc/2, sign/2, snd/1, true/0,
+           verify/3
+equations:
+    adec(aenc(x.1, pk(x.2)), x.2) = x.1,
+    fst(<x.1, x.2>) = x.1,
+    kemdecaps(g, kemencaps(g, ss, kempk(g, sk)), sk) = ss,
+    sdec(senc(x.1, x.2), x.2) = x.1,
+    snd(<x.1, x.2>) = x.2,
+    verify(sign(x.1, x.2), x.1, pk(x.2)) = true
+
+
+
+
+
+/* looping facts with injective instances: FreshTime/1 */
+
+
+
+
+
+
+
+
+
+
+
+restriction Equality:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  // safety formula
+
+restriction unique:
+  "∀ x #i #j.
+    ((UniqueFact( x ) @ #i) ∧ (UniqueFact( x ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+rule (modulo E) Register_pk:
+   [ Fr( ~ltk ) ] --> [ !Ltk( $A, ~ltk ), !Pk( $A, pk(~ltk) ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Get_pk:
+   [ !Pk( A, pubkey ) ] --> [ Out( pubkey ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Reveal_ltk:
+   [ !Ltk( A, ltk ) ]
+  --[ LtkReveal( A ), Reveal( A ) ]->
+   [ Out( ltk ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Reveal_client:
+   [ !ClientKey( ~I, ~k ) ] --[ LtkReveal( ~I ) ]-> [ Out( ~k ) ]
+
+  /* has exactly the trivial AC variant */
+
+restriction OnlyOnce:
+  "∀ t #a #b.
+    ((OnlyOnce( t ) @ #a) ∧ (OnlyOnce( t ) @ #b)) ⇒ (#a = #b)"
+  // safety formula
+
+rule (modulo E) Register_Authorized_User:
+   [ Fr( ~user ), Fr( ~k ) ]
+  -->
+   [ !AdminPublic( $A, ~user, pk(~k) ), !AdminPrivate( $A, ~user, ~k )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) NewTime:
+   [ Fr( ~t ) ] --> [ FreshTime( ~t ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Reveal_token:
+   [ !GlobalToken( $S, token ) ]
+  --[ RevealToken( $S, token ) ]->
+   [ Out( token ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Client_register_1:
+   [
+   Fr( ~I ), Fr( ~k ), !Pk( $S, pkS ),
+   !AdminPrivate( $S, ~admin, ~admin_k )
+   ]
+  --[ OnlyOnce( <'REG_ID', ~I> ), OwnsKey( ~I, ~k ) ]->
+   [
+   ClientState( $S, ~I, <'registering', ~k> ),
+   Out( <<'REGISTER', ~I, pk(~k), ~admin>, 
+         sign(<'REGISTER', ~I, pk(~k), ~admin>, ~k), 
+         sign(sign(<'REGISTER', ~I, pk(~k), ~admin>, ~k), ~admin_k)>
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Server_register:
+   [
+   !Ltk( $S, ~ltkS ), !AdminPublic( $S, ~admin, admin_pk ),
+   In( <<'REGISTER', ~I, k, ~admin>, k_proof, a_proof> )
+   ]
+  --[
+  Eq( verify(k_proof, <'REGISTER', ~I, k, ~admin>, k), true ),
+  Eq( verify(a_proof, k_proof, admin_pk), true ), UniqueFact( ~I ),
+  UniqueFact( k ), NewClientRegistry( $S, ~I, k, admin_pk ),
+  ServerSessionKey( $S, ~I, k ), Running( $S, ~I, k )
+  ]->
+   [
+   SClientRecord( $S, ~I, k, 'init' ),
+   Out( <<'REG_SUCCESS', h(~I)>, sign(<'REG_SUCCESS', h(~I)>, ~ltkS)>
+   )
+   ]
+
+  /*
+  rule (modulo AC) Server_register:
+     [
+     !Ltk( $S, ~ltkS ), !AdminPublic( $S, ~admin, admin_pk ),
+     In( <<'REGISTER', ~I, k, ~admin>, k_proof, a_proof> )
+     ]
+    --[
+    Eq( z, true ), Eq( z.1, true ), UniqueFact( ~I ), UniqueFact( k ),
+    NewClientRegistry( $S, ~I, k, admin_pk ),
+    ServerSessionKey( $S, ~I, k ), Running( $S, ~I, k )
+    ]->
+     [
+     SClientRecord( $S, ~I, k, 'init' ),
+     Out( <<'REG_SUCCESS', h(~I)>, sign(<'REG_SUCCESS', h(~I)>, ~ltkS)>
+     )
+     ]
+    variants (modulo AC)
+    1. ~I    = ~I.21
+       ~admin
+             = ~admin.22
+       a_proof
+             = a_proof.24
+       admin_pk
+             = admin_pk.25
+       k     = k.26
+       k_proof
+             = k_proof.27
+       z     = verify(k_proof.27, <'REGISTER', ~I.21, k.26, ~admin.22>,
+                      k.26)
+       z.1   = verify(a_proof.24, k_proof.27, admin_pk.25)
+    
+    2. ~I    = ~I.40
+       ~admin
+             = ~admin.41
+       a_proof
+             = sign(k_proof.46, x.77)
+       admin_pk
+             = pk(x.77)
+       k     = k.45
+       k_proof
+             = k_proof.46
+       z     = verify(k_proof.46, <'REGISTER', ~I.40, k.45, ~admin.41>,
+                      k.45)
+       z.1   = true
+    
+    3. ~I    = ~I.43
+       ~admin
+             = ~admin.44
+       a_proof
+             = sign(sign(<'REGISTER', ~I.43, pk(x.82), ~admin.44>, x.82), x.83)
+       admin_pk
+             = pk(x.83)
+       k     = pk(x.82)
+       k_proof
+             = sign(<'REGISTER', ~I.43, pk(x.82), ~admin.44>, x.82)
+       z     = true
+       z.1   = true
+    
+    4. ~I    = ~I.44
+       ~admin
+             = ~admin.45
+       a_proof
+             = a_proof.47
+       admin_pk
+             = admin_pk.48
+       k     = pk(x.85)
+       k_proof
+             = sign(<'REGISTER', ~I.44, pk(x.85), ~admin.45>, x.85)
+       z     = true
+       z.1   = verify(a_proof.47,
+                      sign(<'REGISTER', ~I.44, pk(x.85), ~admin.45>, x.85), admin_pk.48)
+  */
+
+rule (modulo E) Client_register_2:
+   [
+   ClientState( $S, ~I, <'registering', ~k> ), !Pk( $S, pkS ),
+   In( <<'REG_SUCCESS', h(~I)>, sig> )
+   ]
+  --[
+  Eq( verify(sig, <'REG_SUCCESS', h(~I)>, pkS), true ),
+  SessionKey( $S, ~I, ~k ), Registered( $S, ~I, ~k ),
+  Cycle( ~I, %1, ~k ), Commit( $S, ~I, pk(~k) )
+  ]->
+   [
+   Cycle( ~I, %1, ~k ), !ClientKey( ~I, ~k ),
+   ClientState( $S, ~I, <'registered', ~k> )
+   ]
+
+  /*
+  rule (modulo AC) Client_register_2:
+     [
+     ClientState( $S, ~I, <'registering', ~k> ), !Pk( $S, pkS ),
+     In( <<'REG_SUCCESS', h(~I)>, sig> )
+     ]
+    --[
+    Eq( z, true ), SessionKey( $S, ~I, ~k ), Registered( $S, ~I, ~k ),
+    Cycle( ~I, %1, ~k ), Commit( $S, ~I, pk(~k) )
+    ]->
+     [
+     Cycle( ~I, %1, ~k ), !ClientKey( ~I, ~k ),
+     ClientState( $S, ~I, <'registered', ~k> )
+     ]
+    variants (modulo AC)
+    1. ~I    = ~I.14
+       pkS   = pkS.16
+       sig   = sig.17
+       z     = verify(sig.17, <'REG_SUCCESS', h(~I.14)>, pkS.16)
+    
+    2. ~I    = ~I.29
+       pkS   = pk(x.55)
+       sig   = sign(<'REG_SUCCESS', h(~I.29)>, x.55)
+       z     = true
+  */
+
+rule (modulo E) Client_cycle_1:
+   [
+   Fr( ~k2 ), ClientState( $S, ~I, <'registered', ~oldK> ),
+   !Pk( $S, pkS )
+   ]
+  --[ StartedCycle( $S, ~I, ~oldK ), OwnsKey( ~I, ~k2 ) ]->
+   [
+   ClientState( $S, ~I, <'cycling', ~k2, ~oldK> ),
+   Out( <<'CYCLE', ~I, pk(~k2)>, sign(<'CYCLE', ~I, pk(~k2)>, ~k2), 
+         sign(sign(<'CYCLE', ~I, pk(~k2)>, ~k2), ~oldK)>
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Serv_cycle_1:
+   [
+   !Ltk( $S, ~ltkS ), SClientRecord( $S, ~I, current_pk, 'init' ),
+   In( <<'CYCLE', ~I, k>, n_proof, o_proof> )
+   ]
+  --[
+  Eq( verify(n_proof, <'CYCLE', ~I, k>, k), true ),
+  Eq( verify(o_proof, n_proof, current_pk), true ),
+  AnswerCycleRequest( $S, ~I, k, current_pk ),
+  InvalidKey( current_pk ), ServerSessionKey( $S, ~I, k ),
+  InvalidateServerSessionKey( $S, ~I, current_pk )
+  ]->
+   [
+   SClientRecord( $S, ~I, k, 'cycled' ),
+   Out( <<'CYCLE_OK', h(<~I, k>)>, 
+         sign(<'CYCLE_OK', h(<~I, k>)>, ~ltkS)>
+   )
+   ]
+
+  /*
+  rule (modulo AC) Serv_cycle_1:
+     [
+     !Ltk( $S, ~ltkS ), SClientRecord( $S, ~I, current_pk, 'init' ),
+     In( <<'CYCLE', ~I, k>, n_proof, o_proof> )
+     ]
+    --[
+    Eq( z, true ), Eq( z.1, true ),
+    AnswerCycleRequest( $S, ~I, k, current_pk ),
+    InvalidKey( current_pk ), ServerSessionKey( $S, ~I, k ),
+    InvalidateServerSessionKey( $S, ~I, current_pk )
+    ]->
+     [
+     SClientRecord( $S, ~I, k, 'cycled' ),
+     Out( <<'CYCLE_OK', h(<~I, k>)>, 
+           sign(<'CYCLE_OK', h(<~I, k>)>, ~ltkS)>
+     )
+     ]
+    variants (modulo AC)
+    1. ~I    = ~I.20
+       current_pk
+             = current_pk.22
+       k     = k.23
+       n_proof
+             = n_proof.24
+       o_proof
+             = o_proof.25
+       z     = verify(n_proof.24, <'CYCLE', ~I.20, k.23>, k.23)
+       z.1   = verify(o_proof.25, n_proof.24, current_pk.22)
+    
+    2. ~I    = ~I.51
+       current_pk
+             = pk(x.99)
+       k     = k.54
+       n_proof
+             = n_proof.55
+       o_proof
+             = sign(n_proof.55, x.99)
+       z     = verify(n_proof.55, <'CYCLE', ~I.51, k.54>, k.54)
+       z.1   = true
+    
+    3. ~I    = ~I.54
+       current_pk
+             = current_pk.56
+       k     = pk(x.105)
+       n_proof
+             = sign(<'CYCLE', ~I.54, pk(x.105)>, x.105)
+       o_proof
+             = o_proof.59
+       z     = true
+       z.1   = verify(o_proof.59,
+                      sign(<'CYCLE', ~I.54, pk(x.105)>, x.105), current_pk.56)
+    
+    4. ~I    = ~I.54
+       current_pk
+             = pk(x.104)
+       k     = pk(x.105)
+       n_proof
+             = sign(<'CYCLE', ~I.54, pk(x.105)>, x.105)
+       o_proof
+             = sign(sign(<'CYCLE', ~I.54, pk(x.105)>, x.105), x.104)
+       z     = true
+       z.1   = true
+  */
+
+rule (modulo E) Deregister_with_server:
+   [ SClientRecord( $S, ~I, k, state ) ]
+  --[ Deregistered( $S, ~I ) ]->
+   [ ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Client_cycle_2:
+   [
+   ClientState( $S, ~I, <'cycling', ~k, ~oldK> ), !Pk( $S, pkS ),
+   Cycle( ~I, %count, ~oldK ),
+   In( <<'CYCLE_OK', h(<~I, pk(~k)>)>, sig> )
+   ]
+  --[
+  Eq( verify(sig, <'CYCLE_OK', h(<~I, pk(~k)>)>, pkS), true ),
+  SessionKeyRhangeover( $S, ~I, ~k, ~oldK ),
+  SessionKey( $S, ~I, ~k ), Cycle( ~I, (%count%+%1), ~k ),
+  InvalidateKey( ~I, ~oldK ), OnlyOnce( <'CLY_CYCLE_LIM', ~I> )
+  ]->
+   [
+   Cycle( ~I, (%count%+%1), ~k ), !ClientKey( ~I, ~k ),
+   ClientState( $S, ~I, <'cycled', ~k> )
+   ]
+
+  // loop breaker: [2]
+  /*
+  rule (modulo AC) Client_cycle_2:
+     [
+     ClientState( $S, ~I, <'cycling', ~k, ~oldK> ), !Pk( $S, pkS ),
+     Cycle( ~I, %count, ~oldK ),
+     In( <<'CYCLE_OK', h(<~I, pk(~k)>)>, sig> )
+     ]
+    --[
+    Eq( z, true ), SessionKeyRhangeover( $S, ~I, ~k, ~oldK ),
+    SessionKey( $S, ~I, ~k ), Cycle( ~I, (%count%+%1), ~k ),
+    InvalidateKey( ~I, ~oldK ), OnlyOnce( <'CLY_CYCLE_LIM', ~I> )
+    ]->
+     [
+     Cycle( ~I, (%count%+%1), ~k ), !ClientKey( ~I, ~k ),
+     ClientState( $S, ~I, <'cycled', ~k> )
+     ]
+    variants (modulo AC)
+    1. ~I    = ~I.17
+       ~k    = ~k.18
+       pkS   = pkS.20
+       sig   = sig.21
+       z     = verify(sig.21, <'CYCLE_OK', h(<~I.17, pk(~k.18)>)>, pkS.20)
+    
+    2. ~I    = ~I.49
+       ~k    = ~k.50
+       pkS   = pk(x.95)
+       sig   = sign(<'CYCLE_OK', h(<~I.49, pk(~k.50)>)>, x.95)
+       z     = true
+    // loop breaker: [2]
+  */
+
+rule (modulo E) Client_tok_init:
+   [
+   Fr( ~time ), Fr( ~payload ), Fr( ~dk ),
+   ClientState( $S, ~I, <ready_state, ~k> ), !Pk( $S, pkS )
+   ]
+  --[
+  MadeTokenRequest( $S, ~I, <$p1, $p2, ~I, ~time, $perms, ~payload> )
+  ]->
+   [
+   FreshTime( ~time ),
+   ClientState( $S, ~I,
+                <'tok_wait', <$p1, $p2, ~I, ~time, $perms, ~payload>, ~k, ~dk>
+   ),
+   Out( <
+         <'STAMP', <$p1, $p2, ~I, ~time, $perms, ~payload>, kempk($G, ~dk)
+         >, 
+         sign(<'STAMP', <$p1, $p2, ~I, ~time, $perms, ~payload>, 
+               kempk($G, ~dk)>,
+              ~k)
+        >
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Server_tok:
+   [
+   SClientRecord( $S, ~I, k, 'init' ), !Ltk( $S, ~ltkS ),
+   Fr( ~newpayload ), Fr( ~ss ), FreshTime( ~time ),
+   In( <<'STAMP', <$p1, $p2, ~I, ~time, $perms, ~payload>, ek>, sig> )
+   ]
+  --[
+  Eq( verify(sig,
+             <'STAMP', <$p1, $p2, ~I, ~time, $perms, ~payload>, ek>, k),
+      true
+  ),
+  TokenApproved( $S, ~I, <$p1, $p2, ~I, ~time, $perms, ~ss>,
+                 <$p1, $p2, ~I, ~time, $perms, ~payload>
+  ),
+  TokenRunning( $S, ~I, <$p1, $p2, ~I, ~time, $perms, ~ss> )
+  ]->
+   [
+   ValidToken( $S, h(<$p1, $p2, ~I, ~time, $perms, ~ss>), 'active' ),
+   !GlobalToken( $S, <$p1, $p2, ~I, ~time, $perms, ~ss> ),
+   Out( h(<$p1, $p2, ~I, ~time, $perms, ~ss>) ), FreshTime( ~time ),
+   SClientRecord( $S, ~I, k,
+                  <'ready', h(<$p1, $p2, ~I, ~time, $perms, ~ss>)>
+   ),
+   Out( <
+         <'STAMPED', 
+          h(<<$p1, $p2, ~I, ~time, $perms, ~ss>, $p1, $p2, ~I, ~time, 
+             $perms, ~payload>), 
+          kemencaps($G, ~ss, ek)>, 
+         sign(<'STAMPED', 
+               h(<<$p1, $p2, ~I, ~time, $perms, ~ss>, $p1, $p2, ~I, ~time, 
+                  $perms, ~payload>), 
+               kemencaps($G, ~ss, ek)>,
+              ~ltkS)
+        >
+   )
+   ]
+
+  // loop breaker: [4]
+  /*
+  rule (modulo AC) Server_tok:
+     [
+     SClientRecord( $S, ~I, k, 'init' ), !Ltk( $S, ~ltkS ),
+     Fr( ~newpayload ), Fr( ~ss ), FreshTime( ~time ),
+     In( <<'STAMP', <$p1, $p2, ~I, ~time, $perms, ~payload>, ek>, sig> )
+     ]
+    --[
+    Eq( z, true ),
+    TokenApproved( $S, ~I, <$p1, $p2, ~I, ~time, $perms, ~ss>,
+                   <$p1, $p2, ~I, ~time, $perms, ~payload>
+    ),
+    TokenRunning( $S, ~I, <$p1, $p2, ~I, ~time, $perms, ~ss> )
+    ]->
+     [
+     ValidToken( $S, h(<$p1, $p2, ~I, ~time, $perms, ~ss>), 'active' ),
+     !GlobalToken( $S, <$p1, $p2, ~I, ~time, $perms, ~ss> ),
+     Out( h(<$p1, $p2, ~I, ~time, $perms, ~ss>) ), FreshTime( ~time ),
+     SClientRecord( $S, ~I, k,
+                    <'ready', h(<$p1, $p2, ~I, ~time, $perms, ~ss>)>
+     ),
+     Out( <
+           <'STAMPED', 
+            h(<<$p1, $p2, ~I, ~time, $perms, ~ss>, $p1, $p2, ~I, ~time, 
+               $perms, ~payload>), 
+            kemencaps($G, ~ss, ek)>, 
+           sign(<'STAMPED', 
+                 h(<<$p1, $p2, ~I, ~time, $perms, ~ss>, $p1, $p2, ~I, ~time, 
+                    $perms, ~payload>), 
+                 kemencaps($G, ~ss, ek)>,
+                ~ltkS)
+          >
+     )
+     ]
+    variants (modulo AC)
+    1. $p1   = $p1.33
+       $p2   = $p2.34
+       $perms
+             = $perms.35
+       ~I    = ~I.36
+       ~payload
+             = ~payload.39
+       ~time = ~time.41
+       ek    = ek.42
+       k     = k.43
+       sig   = sig.44
+       z     = verify(sig.44,
+                      <'STAMP', 
+                       <$p1.33, $p2.34, ~I.36, ~time.41, $perms.35, ~payload.39>, ek.42>,
+                      k.43)
+    
+    2. $p1   = $p1.104
+       $p2   = $p2.105
+       $perms
+             = $perms.106
+       ~I    = ~I.107
+       ~payload
+             = ~payload.110
+       ~time = ~time.112
+       ek    = ek.113
+       k     = pk(x.204)
+       sig   = sign(<'STAMP', 
+                     <$p1.104, $p2.105, ~I.107, ~time.112, $perms.106, ~payload.110>, 
+                     ek.113>,
+                    x.204)
+       z     = true
+    // loop breaker: [4]
+  */
+
+rule (modulo E) Client_tok_2:
+   [
+   ClientState( $S, ~I,
+                <'tok_wait', <$p1, $p2, ~I, ~time, $perms, ~payload>, ~k, ~dk>
+   ),
+   !Pk( $S, pkS ),
+   In( <
+        <'STAMPED', 
+         h(<<$p1, $p2, ~I, ~time, $perms, kemdecaps($G, ct, ~dk)>, $p1, 
+            $p2, ~I, ~time, $perms, ~payload>), 
+         ct>, 
+        sig>
+   )
+   ]
+  --[
+  Eq( verify(sig,
+             <'STAMPED', 
+              h(<<$p1, $p2, ~I, ~time, $perms, kemdecaps($G, ct, ~dk)>, $p1, 
+                 $p2, ~I, ~time, $perms, ~payload>), 
+              ct>,
+             pkS),
+      true
+  ),
+  HasToken( $S, ~I,
+            <$p1, $p2, ~I, ~time, $perms, kemdecaps($G, ct, ~dk)>
+  ),
+  TokenCommit( $S, ~I,
+               <$p1, $p2, ~I, ~time, $perms, kemdecaps($G, ct, ~dk)>
+  )
+  ]->
+   [
+   ClientState( $S, ~I,
+                <'ready', <$p1, $p2, ~I, ~time, $perms, kemdecaps($G, ct, ~dk)>, ~k
+                >
+   )
+   ]
+
+  /*
+  rule (modulo AC) Client_tok_2:
+     [
+     ClientState( $S, ~I,
+                  <'tok_wait', <$p1, $p2, ~I, ~time, $perms, ~payload>, ~k, ~dk>
+     ),
+     !Pk( $S, pkS ),
+     In( <
+          <'STAMPED', 
+           h(<<$p1, $p2, ~I, ~time, $perms, z>, $p1, $p2, ~I, ~time, $perms, 
+              ~payload>), 
+           ct>, 
+          sig>
+     )
+     ]
+    --[
+    Eq( z.1, true ),
+    HasToken( $S, ~I, <$p1, $p2, ~I, ~time, $perms, z> ),
+    TokenCommit( $S, ~I, <$p1, $p2, ~I, ~time, $perms, z> )
+    ]->
+     [
+     ClientState( $S, ~I,
+                  <'ready', <$p1, $p2, ~I, ~time, $perms, z>, ~k>
+     )
+     ]
+    variants (modulo AC)
+    1. $p1   = $p1.52
+       $p2   = $p2.53
+       $perms
+             = $perms.54
+       ~I    = ~I.55
+       ~dk   = ~dk.56
+       ~payload
+             = ~payload.58
+       ~time = ~time.59
+       ct    = ct.60
+       pkS   = pkS.61
+       sig   = sig.62
+       z     = kemdecaps($G.100, ct.60, ~dk.56)
+       z.1   = verify(sig.62,
+                      <'STAMPED', 
+                       h(<
+                          <$p1.52, $p2.53, ~I.55, ~time.59, $perms.54, 
+                           kemdecaps($G.100, ct.60, ~dk.56)>, 
+                          $p1.52, $p2.53, ~I.55, ~time.59, $perms.54, ~payload.58>), 
+                       ct.60>,
+                      pkS.61)
+    
+    2. $p1   = $p1.52
+       $p2   = $p2.53
+       $perms
+             = $perms.54
+       ~I    = ~I.55
+       ~dk   = ~dk.56
+       ~payload
+             = ~payload.58
+       ~time = ~time.59
+       ct    = kemencaps($x.100, z.65, kempk($x.100, ~dk.56))
+       pkS   = pkS.61
+       sig   = sig.62
+       z     = z.65
+       z.1   = verify(sig.62,
+                      <'STAMPED', 
+                       h(<<$p1.52, $p2.53, ~I.55, ~time.59, $perms.54, z.65>, $p1.52, 
+                          $p2.53, ~I.55, ~time.59, $perms.54, ~payload.58>), 
+                       kemencaps($x.100, z.65, kempk($x.100, ~dk.56))>,
+                      pkS.61)
+    
+    3. $p1   = $p1.63
+       $p2   = $p2.64
+       $perms
+             = $perms.65
+       ~I    = ~I.66
+       ~dk   = ~dk.67
+       ~payload
+             = ~payload.69
+       ~time = ~time.70
+       ct    = ct.71
+       pkS   = pk(x.122)
+       sig   = sign(<'STAMPED', 
+                     h(<
+                        <$p1.63, $p2.64, ~I.66, ~time.70, $perms.65, 
+                         kemdecaps($x.111, ct.71, ~dk.67)>, 
+                        $p1.63, $p2.64, ~I.66, ~time.70, $perms.65, ~payload.69>), 
+                     ct.71>,
+                    x.122)
+       z     = kemdecaps($x.111, ct.71, ~dk.67)
+       z.1   = true
+    
+    4. $p1   = $p1.63
+       $p2   = $p2.64
+       $perms
+             = $perms.65
+       ~I    = ~I.66
+       ~dk   = ~dk.67
+       ~payload
+             = ~payload.69
+       ~time = ~time.70
+       ct    = kemencaps($x.111, z.76, kempk($x.111, ~dk.67))
+       pkS   = pk(x.122)
+       sig   = sign(<'STAMPED', 
+                     h(<<$p1.63, $p2.64, ~I.66, ~time.70, $perms.65, z.76>, $p1.63, 
+                        $p2.64, ~I.66, ~time.70, $perms.65, ~payload.69>), 
+                     kemencaps($x.111, z.76, kempk($x.111, ~dk.67))>,
+                    x.122)
+       z     = z.76
+       z.1   = true
+  */
+
+rule (modulo E) Expire_token:
+   [ ValidToken( $S, tok, 'active' ) ]
+  --[ ExpireToken( $S, tok ) ]->
+   [ ValidToken( $S, tok, 'expired' ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Revoke_token:
+   [ ValidToken( $S, tok, 'active' ) ]
+  --[ RevokedToken( $S, tok ) ]->
+   [ ValidToken( $S, tok, 'revoked' ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) ServerVerify:
+   [ ValidToken( $S, tokenHash, 'active' ) ]
+  --[ VerifiesToken( $S, tokenHash ) ]->
+   [ ValidToken( $S, tokenHash, 'verified' ) ]
+
+  /* has exactly the trivial AC variant */
+
+lemma Exists_verification_trace:
+  exists-trace
+  "∃ S I t #i #j.
+    (((HasToken( S, I, t ) @ #i) ∧ (VerifiesToken( S, h(t) ) @ #j)) ∧
+     (¬(∃ #r. LtkReveal( S ) @ #r))) ∧
+    (¬(∃ #r. LtkReveal( I ) @ #r))"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ S I t #i #j.
+  (HasToken( S, I, t ) @ #i) ∧ (VerifiesToken( S, h(t) ) @ #j)
+ ∧
+  (∀ #r. (LtkReveal( S ) @ #r) ⇒ ⊥) ∧
+  (∀ #r. (LtkReveal( I ) @ #r) ⇒ ⊥)"
+*/
+by sorry
+
+lemma InjectiveKeyAgreement [reuse]:
+  all-traces
+  "∀ S I k #i.
+    (((Commit( S, I, k ) @ #i) ∧ (¬(∃ #r. LtkReveal( S ) @ #r))) ∧
+     (¬(∃ #r. LtkReveal( I ) @ #r))) ⇒
+    ((∃ #j. (Running( S, I, k ) @ #j) ∧ (#j < #i)) ∧
+     (¬(∃ S2 I2 #i2. (Commit( S2, I2, k ) @ #i2) ∧ (¬(#i = #i2)))))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S I k #i.
+  (Commit( S, I, k ) @ #i)
+ ∧
+  (∀ #r. (LtkReveal( S ) @ #r) ⇒ ⊥) ∧
+  (∀ #r. (LtkReveal( I ) @ #r) ⇒ ⊥) ∧
+  (((∀ #j. (Running( S, I, k ) @ #j) ⇒ ¬(#j < #i)) ∨
+    (∃ S2 I2 #i2. (Commit( S2, I2, k ) @ #i2) ∧ ¬(#i = #i2))))"
+*/
+simplify
+solve( (∀ #j. (Running( $S, ~I, pk(~k) ) @ #j) ⇒ ¬(#j < #i))  ∥
+       (∃ S2 I2 #i2. (Commit( S2, I2, pk(~k) ) @ #i2) ∧ ¬(#i = #i2)) )
+  case case_1
+  solve( ClientState( $S, ~I, <'registering', ~k> ) ▶₀ #i )
+    case Client_register_1
+    solve( !Pk( $S, pk(x) ) ▶₁ #i )
+      case Register_pk
+      solve( !KU( sign(<'REG_SUCCESS', h(~I)>, ~ltk) ) @ #vk.4 )
+        case Server_register
+        solve( !KU( ~admin.1 ) @ #vk.12 )
+          case Client_register_1
+          solve( !KU( sign(<'REGISTER', ~I, pk(x), ~admin.1>, x) ) @ #vk.14 )
+            case Client_register_1
+            by contradiction /* from formulas */
+          next
+            case c_sign
+            solve( !KU( sign(sign(<'REGISTER', ~I, pk(x), ~admin.1>, x), ~k.2)
+                   ) @ #vk.15 )
+              case Client_register_1
+              by contradiction /* from formulas */
+            next
+              case c_sign
+              by solve( !KU( ~k.2 ) @ #vk.17 )
+            qed
+          qed
+        qed
+      next
+        case c_sign
+        solve( !KU( ~ltk ) @ #vk.5 )
+          case Reveal_ltk
+          by contradiction /* from formulas */
+        qed
+      qed
+    qed
+  qed
+next
+  case case_2
+  solve( (#i < #i2)  ∥ (#i2 < #i) )
+    case case_1
+    solve( ClientState( $S, ~I, <'registering', ~k> ) ▶₀ #i )
+      case Client_register_1
+      solve( !Pk( $S, pk(x) ) ▶₁ #i )
+        case Register_pk
+        solve( ClientState( $S.1, ~I.1, <'registering', ~k> ) ▶₀ #i2 )
+          case Client_register_1
+          by contradiction /* cyclic */
+        qed
+      qed
+    qed
+  next
+    case case_2
+    solve( ClientState( $S, ~I, <'registering', ~k> ) ▶₀ #i )
+      case Client_register_1
+      solve( !Pk( $S, pk(x) ) ▶₁ #i )
+        case Register_pk
+        solve( ClientState( $S.1, ~I.1, <'registering', ~k> ) ▶₀ #i2 )
+          case Client_register_1
+          by contradiction /* cyclic */
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma InjectiveTokenAgreement [reuse]:
+  all-traces
+  "∀ S I t #i.
+    (((TokenCommit( S, I, t ) @ #i) ∧ (¬(∃ #r. LtkReveal( S ) @ #r))) ∧
+     (¬(∃ #r. LtkReveal( I ) @ #r))) ⇒
+    ((∃ #j. (TokenRunning( S, I, t ) @ #j) ∧ (#j < #i)) ∧
+     (¬(∃ S2 I2 #i2. (Commit( S2, I2, t ) @ #i2) ∧ (¬(#i = #i2)))))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S I t #i.
+  (TokenCommit( S, I, t ) @ #i)
+ ∧
+  (∀ #r. (LtkReveal( S ) @ #r) ⇒ ⊥) ∧
+  (∀ #r. (LtkReveal( I ) @ #r) ⇒ ⊥) ∧
+  (((∀ #j. (TokenRunning( S, I, t ) @ #j) ⇒ ¬(#j < #i)) ∨
+    (∃ S2 I2 #i2. (Commit( S2, I2, t ) @ #i2) ∧ ¬(#i = #i2))))"
+*/
+simplify
+solve( (∀ #j.
+         (TokenRunning( $S, ~I, <$p1, $p2, ~I, ~time, $perms, z> ) @ #j)
+        ⇒
+         ¬(#j < #i))  ∥
+       (∃ S2 I2 #i2.
+         (Commit( S2, I2, <$p1, $p2, ~I, ~time, $perms, z> ) @ #i2)
+        ∧
+         ¬(#i = #i2)) )
+  case case_1
+  solve( !Pk( $S, pk(x) ) ▶₁ #i )
+    case Register_pk
+    solve( ClientState( $S, ~I,
+                        <'tok_wait', <$p1, $p2, ~I, ~time, $perms, ~payload>, ~k, ~dk>
+           ) ▶₀ #i )
+      case Client_tok_init_case_1
+      solve( !KU( sign(<'STAMPED', 
+                        h(<<$p1, $p2, ~I, ~time, $perms, z>, $p1, $p2, ~I, ~time, $perms, 
+                           ~payload>), 
+                        ct>,
+                       ~ltk)
+             ) @ #vk.6 )
+        case Server_tok
+        by contradiction /* from formulas */
+      next
+        case c_sign
+        solve( !KU( ~ltk ) @ #vk.7 )
+          case Reveal_ltk
+          by contradiction /* from formulas */
+        qed
+      qed
+    next
+      case Client_tok_init_case_2
+      solve( !KU( sign(<'REG_SUCCESS', h(~I)>, ~ltk.2) ) @ #vk.11 )
+        case Server_register
+        solve( !KU( sign(sign(<'REGISTER', ~I, pk(x), ~admin.1>, x), ~k.1)
+               ) @ #vk.22 )
+          case Client_register_1
+          solve( !KU( sign(<'STAMPED', 
+                            h(<<$p1, $p2, ~I, ~time, $perms, z>, $p1, $p2, ~I, ~time, $perms, 
+                               ~payload>), 
+                            ct>,
+                           ~ltk)
+                 ) @ #vk.9 )
+            case Server_tok
+            by contradiction /* from formulas */
+          next
+            case c_sign
+            solve( !KU( ~ltk ) @ #vk.23 )
+              case Reveal_ltk
+              by contradiction /* from formulas */
+            qed
+          qed
+        next
+          case c_sign
+          by solve( !KU( ~k.1 ) @ #vk.23 )
+        qed
+      next
+        case c_sign
+        solve( !KU( ~ltk.2 ) @ #vk.12 )
+          case Reveal_ltk
+          by contradiction /* from formulas */
+        qed
+      qed
+    next
+      case Client_tok_init_case_3
+      solve( !KU( sign(<'STAMPED', 
+                        h(<<$p1, $p2, ~I, ~time, $perms, z>, $p1, $p2, ~I, ~time, $perms, 
+                           ~payload>), 
+                        ct>,
+                       ~ltk)
+             ) @ #vk.6 )
+        case Server_tok
+        by contradiction /* from formulas */
+      next
+        case c_sign
+        solve( !KU( ~ltk ) @ #vk.17 )
+          case Reveal_ltk
+          by contradiction /* from formulas */
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma Exists_register_trace:
+  exists-trace
+  "∃ S I k #i.
+    (Registered( S, I, k ) @ #i) ∧ (¬(∃ #r. LtkReveal( S ) @ #r))"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ S I k #i.
+  (Registered( S, I, k ) @ #i) ∧ ∀ #r. (LtkReveal( S ) @ #r) ⇒ ⊥"
+*/
+simplify
+solve( (∃ #r. (LtkReveal( $S ) @ #r))  ∥
+       (∃ #r. (LtkReveal( ~I ) @ #r))  ∥
+       ((∃ #j. (Running( $S, ~I, pk(~k) ) @ #j) ∧ #j < #i) ∧
+        (∀ S2 I2 #i2. (Commit( S2, I2, pk(~k) ) @ #i2) ⇒ #i = #i2)) )
+  case case_2
+  solve( ClientState( $S, ~I, <'registering', ~k> ) ▶₀ #i )
+    case Client_register_1
+    solve( !Pk( $S, pk(x) ) ▶₁ #i )
+      case Register_pk
+      solve( LtkReveal( ~I ) @ #r )
+        case Reveal_client
+        solve( !ClientKey( ~I, ~k.1 ) ▶₀ #r )
+          case Client_register_2
+          solve( !KU( sign(<'REG_SUCCESS', h(~I)>, ~ltk) ) @ #vk.4 )
+            case Server_register
+            solve( !KU( ~admin.1 ) @ #vk.12 )
+              case Client_register_1
+              solve( !KU( sign(<'REGISTER', ~I, pk(x), ~admin.1>, x) ) @ #vk.14 )
+                case Client_register_1
+                solve( !KU( ~I ) @ #vk.12 )
+                  case Client_register_1
+                  solve( !KU( sign(sign(<'REGISTER', ~I, pk(~k), ~admin>, ~k),
+                                   ~admin_k)
+                         ) @ #vk.15 )
+                    case Client_register_1
+                    solve( !KU( h(~I) ) @ #vk.13 )
+                      case Server_register
+                      solve( !KU( pk(~k) ) @ #vk.15 )
+                        case Client_register_1
+                        SOLVED // trace found
+                      qed
+                    qed
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma Exists_cycle_trace:
+  exists-trace
+  "∃ S I k1 k2 #i.
+    (SessionKeyRhangeover( S, I, k1, k2 ) @ #i) ∧
+    (¬(∃ #r. LtkReveal( S ) @ #r))"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ S I k1 k2 #i.
+  (SessionKeyRhangeover( S, I, k1, k2 ) @ #i)
+ ∧
+  ∀ #r. (LtkReveal( S ) @ #r) ⇒ ⊥"
+*/
+simplify
+solve( ClientState( $S, ~I, <'cycling', ~k, ~oldK> ) ▶₀ #i )
+  case Client_cycle_1
+  solve( (∃ #r. (LtkReveal( $S ) @ #r))  ∥
+         (∃ #r. (LtkReveal( ~I ) @ #r))  ∥
+         ((∃ #j. (Running( $S, ~I, pk(~oldK) ) @ #j) ∧ #j < #vr.1) ∧
+          (∀ S2 I2 #i2. (Commit( S2, I2, pk(~oldK) ) @ #i2) ⇒ #vr.1 = #i2)) )
+    case case_2
+    solve( !Pk( $S, pk(x) ) ▶₁ #i )
+      case Register_pk
+      solve( LtkReveal( ~I ) @ #r )
+        case Reveal_client
+        solve( !ClientKey( ~I, ~k.1 ) ▶₀ #r )
+          case Client_cycle_2
+          solve( !KU( sign(<'CYCLE_OK', h(<~I, pk(~k)>)>, ~ltk) ) @ #vk.4 )
+            case Serv_cycle_1
+            solve( !KU( ~admin.1 ) @ #vk.25 )
+              case Client_register_1
+              solve( !KU( sign(<'REG_SUCCESS', h(~I)>, ~ltk.2) ) @ #vk.10 )
+                case Server_register
+                solve( !KU( sign(sign(<'CYCLE', ~I, pk(~k)>, ~k), x) ) @ #vk.23 )
+                  case Client_cycle_1
+                  solve( !KU( sign(<'REGISTER', ~I, pk(~oldK), ~admin>, ~oldK)
+                         ) @ #vk.27 )
+                    case Client_register_1
+                    solve( Cycle( ~I, %count, ~oldK ) ▶₂ #i )
+                      case Client_register_2
+                      solve( !KU( ~I ) @ #vk.23 )
+                        case Client_register_1
+                        solve( !KU( sign(<'CYCLE', ~I, pk(~k)>, ~k) ) @ #vk.25 )
+                          case Client_cycle_1
+                          solve( !KU( sign(sign(<'REGISTER', ~I, pk(~oldK), ~admin>, ~oldK),
+                                           ~admin_k)
+                                 ) @ #vk.28 )
+                            case Client_register_1
+                            solve( !KU( h(<~I, pk(~k)>) ) @ #vk.21 )
+                              case Serv_cycle_1
+                              solve( !KU( h(~I) ) @ #vk.24 )
+                                case Server_register
+                                solve( !KU( pk(~k) ) @ #vk.26 )
+                                  case Client_cycle_1
+                                  solve( !KU( pk(~oldK) ) @ #vk.28 )
+                                    case Client_register_1
+                                    SOLVED // trace found
+                                  qed
+                                qed
+                              qed
+                            qed
+                          qed
+                        qed
+                      qed
+                    qed
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma SessionKeyPreceededByOwnership [reuse]:
+  all-traces
+  "∀ S I k #x.
+    (SessionKey( S, I, k ) @ #x) ⇒
+    (∃ #y. (OwnsKey( I, k ) @ #y) ∧ (#y < #x))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S I k #x.
+  (SessionKey( S, I, k ) @ #x)
+ ∧
+  ∀ #y. (OwnsKey( I, k ) @ #y) ⇒ ¬(#y < #x)"
+*/
+simplify
+solve( SessionKey( S, I, k ) @ #x )
+  case Client_cycle_2
+  solve( ClientState( $S, ~I, <'cycling', ~k, ~oldK> ) ▶₀ #x )
+    case Client_cycle_1
+    by contradiction /* from formulas */
+  qed
+next
+  case Client_register_2
+  solve( (∃ #r. (LtkReveal( $S ) @ #r))  ∥
+         (∃ #r. (LtkReveal( ~I ) @ #r))  ∥
+         ((∃ #j. (Running( $S, ~I, pk(~k) ) @ #j) ∧ #j < #x) ∧
+          (∀ S2 I2 #i2. (Commit( S2, I2, pk(~k) ) @ #i2) ⇒ #x = #i2)) )
+    case case_1
+    solve( ClientState( $S, ~I, <'registering', ~k> ) ▶₀ #x.1 )
+      case Client_register_1
+      by contradiction /* from formulas */
+    qed
+  next
+    case case_2
+    solve( ClientState( $S, ~I, <'registering', ~k> ) ▶₀ #x.1 )
+      case Client_register_1
+      by contradiction /* from formulas */
+    qed
+  next
+    case case_3
+    solve( ClientState( $S, ~I, <'registering', ~k> ) ▶₀ #x.1 )
+      case Client_register_1
+      by contradiction /* from formulas */
+    qed
+  qed
+qed
+
+lemma SessionKeyRel:
+  all-traces
+  "∀ S I newK oldK #x.
+    (SessionKeyRhangeover( S, I, newK, oldK ) @ #x) ⇒
+    (∃ #y. SessionKey( S, I, newK ) @ #y)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S I newK oldK #x.
+  (SessionKeyRhangeover( S, I, newK, oldK ) @ #x)
+ ∧
+  ∀ #y. (SessionKey( S, I, newK ) @ #y) ⇒ ⊥"
+*/
+simplify
+by contradiction /* from formulas */
+
+lemma CycleOwnsOldKey [reuse]:
+  all-traces
+  "∀ S I newK oldK #x.
+    ((SessionKeyRhangeover( S, I, newK, oldK ) @ #x) ∧
+     (¬(∃ #r. LtkReveal( S ) @ #r))) ⇒
+    (∃ #y. (SessionKey( S, I, oldK ) @ #y) ∧ (#y < #x))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S I newK oldK #x.
+  (SessionKeyRhangeover( S, I, newK, oldK ) @ #x)
+ ∧
+  (∀ #r. (LtkReveal( S ) @ #r) ⇒ ⊥) ∧
+  (∀ #y. (SessionKey( S, I, oldK ) @ #y) ⇒ ¬(#y < #x))"
+*/
+simplify
+solve( ClientState( $S, ~I, <'cycling', ~k, ~oldK> ) ▶₀ #x )
+  case Client_cycle_1
+  by contradiction /* from formulas */
+qed
+
+lemma CycleOwnsNewKey [reuse]:
+  all-traces
+  "∀ S I newK oldK #x.
+    ((SessionKeyRhangeover( S, I, newK, oldK ) @ #x) ∧
+     (¬(∃ #r. LtkReveal( S ) @ #r))) ⇒
+    (∃ #y. (OwnsKey( I, newK ) @ #y) ∧ (#y < #x))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S I newK oldK #x.
+  (SessionKeyRhangeover( S, I, newK, oldK ) @ #x)
+ ∧
+  (∀ #r. (LtkReveal( S ) @ #r) ⇒ ⊥) ∧
+  (∀ #y. (OwnsKey( I, newK ) @ #y) ⇒ ¬(#y < #x))"
+*/
+simplify
+by contradiction /* from formulas */
+
+lemma RegisterOwnsKey [reuse]:
+  all-traces
+  "∀ S I k #x.
+    (Registered( S, I, k ) @ #x) ⇒ (∃ #y. OwnsKey( I, k ) @ #y)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S I k #x.
+  (Registered( S, I, k ) @ #x) ∧ ∀ #y. (OwnsKey( I, k ) @ #y) ⇒ ⊥"
+*/
+simplify
+by contradiction /* from formulas */
+
+lemma ServerCycleApproval [reuse,
+                           hide_lemma=InjectiveKeyAgreement]:
+  all-traces
+  "∀ S I newK oldK #x.
+    (((AnswerCycleRequest( S, I, pk(newK), pk(oldK) ) @ #x) ∧
+      (¬(∃ #r. LtkReveal( S ) @ #r))) ∧
+     (¬(∃ #r. LtkReveal( I ) @ #r))) ⇒
+    ((((∃ k_o a_o #r. NewClientRegistry( S, I, k_o, a_o ) @ #r) ∧
+       (∃ #r. (ServerSessionKey( S, I, pk(oldK) ) @ #r) ∧ (#r < #x))) ∧
+      (¬(∃ #r.
+          (InvalidateServerSessionKey( S, I, pk(oldK) ) @ #r) ∧
+          (#r < #x)))) ∧
+     (∃ #y. (OwnsKey( I, oldK ) @ #y) ∧ (#y < #x)))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S I newK oldK #x.
+  (AnswerCycleRequest( S, I, pk(newK), pk(oldK) ) @ #x)
+ ∧
+  (∀ #r. (LtkReveal( S ) @ #r) ⇒ ⊥) ∧
+  (∀ #r. (LtkReveal( I ) @ #r) ⇒ ⊥) ∧
+  (((∀ k_o a_o #r. (NewClientRegistry( S, I, k_o, a_o ) @ #r) ⇒ ⊥) ∨
+    (∀ #r. (ServerSessionKey( S, I, pk(oldK) ) @ #r) ⇒ ¬(#r < #x)) ∨
+    (∃ #r.
+      (InvalidateServerSessionKey( S, I, pk(oldK) ) @ #r) ∧ #r < #x) ∨
+    (∀ #y. (OwnsKey( I, oldK ) @ #y) ⇒ ¬(#y < #x))))"
+*/
+simplify
+solve( (∀ k_o a_o #r.
+         (NewClientRegistry( $S, ~I, k_o, a_o ) @ #r) ⇒ ⊥)  ∥
+       (∀ #r. (ServerSessionKey( $S, ~I, pk(oldK) ) @ #r) ⇒ ¬(#r < #x))  ∥
+       (∃ #r.
+         (InvalidateServerSessionKey( $S, ~I, pk(oldK) ) @ #r) ∧ #r < #x)  ∥
+       (∀ #y. (OwnsKey( ~I, oldK ) @ #y) ⇒ ¬(#y < #x)) )
+  case case_1
+  solve( SClientRecord( $S, ~I, pk(oldK), 'init' ) ▶₁ #x )
+    case Server_register
+    by contradiction /* from formulas */
+  qed
+next
+  case case_2
+  solve( SClientRecord( $S, ~I, pk(oldK), 'init' ) ▶₁ #x )
+    case Server_register
+    by contradiction /* from formulas */
+  qed
+next
+  case case_3
+  solve( SClientRecord( $S, ~I, pk(oldK), 'init' ) ▶₁ #x )
+    case Server_register
+    solve( SClientRecord( $S, ~I, pk(oldK), 'init' ) ▶₁ #r )
+      case Server_register
+      by contradiction /* cyclic */
+    qed
+  qed
+next
+  case case_4
+  solve( !KU( sign(<'CYCLE', ~I, pk(newK)>, newK) ) @ #vk.7 )
+    case Client_cycle_1
+    solve( !KU( sign(sign(<'CYCLE', ~I, pk(~k2)>, ~k2), oldK)
+           ) @ #vk.8 )
+      case Client_cycle_1
+      by contradiction /* from formulas */
+    next
+      case c_sign
+      solve( !KU( sign(<'REG_SUCCESS', h(~I)>, ~ltk.1) ) @ #vk.13 )
+        case Server_register
+        solve( !KU( sign(<'REGISTER', ~I, pk(x.1), ~admin.1>, x.1)
+               ) @ #vk.23 )
+          case Client_register_1
+          solve( !KU( sign(sign(<'REGISTER', ~I, pk(~oldK.1), ~admin>,
+                                ~oldK.1),
+                           ~admin_k)
+                 ) @ #vk.24 )
+            case Client_register_1
+            solve( SClientRecord( $S.1, ~I, pk(oldK), 'init' ) ▶₁ #x )
+              case Server_register
+              by contradiction /* from formulas */
+            qed
+          next
+            case c_sign
+            by solve( !KU( ~admin_k ) @ #vk.25 )
+          qed
+        next
+          case c_sign
+          solve( SClientRecord( $S.1, ~I, pk(oldK), 'init' ) ▶₁ #x )
+            case Server_register
+            solve( !KU( sign(sign(<'REGISTER', ~I, pk(oldK), ~admin>, oldK),
+                             ~k)
+                   ) @ #vk.24 )
+              case Client_register_1
+              by contradiction /* from formulas */
+            next
+              case c_sign
+              by solve( !KU( ~k ) @ #vk.25 )
+            qed
+          qed
+        qed
+      next
+        case c_sign
+        solve( !KU( ~ltk.1 ) @ #vk.15 )
+          case Reveal_ltk
+          solve( !Ltk( $S.1, ~ltkS ) ▶₀ #x )
+            case Register_pk
+            solve( SClientRecord( $S.1, ~I, pk(oldK), 'init' ) ▶₁ #x )
+              case Server_register
+              solve( OwnsKey( ~I, ~oldK.1 ) @ #y.1 )
+                case Client_register_1
+                solve( OwnsKey( ~I, ~oldK.1 ) @ #y.1 )
+                  case Client_register_1
+                  solve( !KU( ~admin.1 ) @ #vk.22 )
+                    case Client_register_1
+                    solve( !KU( sign(<'REGISTER', ~I, pk(oldK), ~admin.1>, oldK)
+                           ) @ #vk.24 )
+                      case Client_register_1
+                      by contradiction /* from formulas */
+                    next
+                      case c_sign
+                      solve( !KU( sign(sign(<'REGISTER', ~I, pk(oldK), ~admin.1>, oldK),
+                                       ~k.1)
+                             ) @ #vk.25 )
+                        case Client_register_1
+                        by contradiction /* from formulas */
+                      next
+                        case c_sign
+                        by solve( !KU( ~k.1 ) @ #vk.26 )
+                      qed
+                    qed
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+  next
+    case c_sign
+    solve( !KU( sign(sign(<'CYCLE', ~I, pk(newK)>, newK), oldK)
+           ) @ #vk.8 )
+      case Client_cycle_1
+      by contradiction /* from formulas */
+    next
+      case c_sign
+      solve( SClientRecord( $S, ~I, pk(oldK), 'init' ) ▶₁ #x )
+        case Server_register
+        solve( !KU( sign(<'REGISTER', ~I, pk(oldK), ~admin>, oldK)
+               ) @ #vk.19 )
+          case Client_register_1
+          by contradiction /* from formulas */
+        next
+          case c_sign
+          solve( !KU( sign(sign(<'REGISTER', ~I, pk(oldK), ~admin>, oldK),
+                           ~k)
+                 ) @ #vk.20 )
+            case Client_register_1
+            by contradiction /* from formulas */
+          next
+            case c_sign
+            by solve( !KU( ~k ) @ #vk.21 )
+          qed
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma NoVerificationPostExpiry [use_induction, reuse]:
+  all-traces
+  "¬(∃ S t #i #j.
+      ((VerifiesToken( S, h(t) ) @ #i) ∧ (ExpireToken( S, h(t) ) @ #j)) ∧
+      (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S t #i #j.
+  (VerifiesToken( S, h(t) ) @ #i) ∧ (ExpireToken( S, h(t) ) @ #j)
+ ∧
+  #j < #i"
+*/
+induction
+  case empty_trace
+  by contradiction /* from formulas */
+next
+  case non_empty_trace
+  simplify
+  solve( ValidToken( $S, h(t), 'active' ) ▶₀ #i )
+    case Server_tok
+    by solve( ValidToken( $S, h(<$p1, $p2, ~I, ~time, $perms, ~ss>),
+                          'active'
+              ) ▶₀ #j )
+  qed
+qed
+
+lemma NoVerificationPostRevoke [use_induction, reuse]:
+  all-traces
+  "¬(∃ S t #i #j.
+      ((VerifiesToken( S, h(t) ) @ #i) ∧
+       (RevokedToken( S, h(t) ) @ #j)) ∧
+      (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S t #i #j.
+  (VerifiesToken( S, h(t) ) @ #i) ∧ (RevokedToken( S, h(t) ) @ #j)
+ ∧
+  #j < #i"
+*/
+induction
+  case empty_trace
+  by contradiction /* from formulas */
+next
+  case non_empty_trace
+  simplify
+  solve( ValidToken( $S, h(t), 'active' ) ▶₀ #i )
+    case Server_tok
+    by solve( ValidToken( $S, h(<$p1, $p2, ~I, ~time, $perms, ~ss>),
+                          'active'
+              ) ▶₀ #j )
+  qed
+qed
+
+lemma SecrecyForward [reuse]:
+  all-traces
+  "∀ S I k #i.
+    ((((SessionKey( S, I, k ) @ #i) ∧ (¬(∃ #r. LtkReveal( S ) @ #r))) ∧
+      (¬(∃ #r. LtkReveal( I ) @ #r))) ∧
+     (¬(∃ #r. InvalidateKey( I, k ) @ #r))) ⇒
+    (¬(∃ #j. K( k ) @ #j))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ S I k #i.
+  (SessionKey( S, I, k ) @ #i)
+ ∧
+  (∀ #r. (LtkReveal( S ) @ #r) ⇒ ⊥) ∧
+  (∀ #r. (LtkReveal( I ) @ #r) ⇒ ⊥) ∧
+  (∀ #r. (InvalidateKey( I, k ) @ #r) ⇒ ⊥) ∧
+  (∃ #j. (K( k ) @ #j))"
+*/
+simplify
+solve( SessionKey( S, I, k ) @ #i )
+  case Client_cycle_2
+  solve( (∃ #r. (LtkReveal( $S ) @ #r))  ∥
+         (∃ #y. (OwnsKey( ~I, ~k ) @ #y) ∧ #y < #i) )
+    case case_1
+    by contradiction /* from formulas */
+  next
+    case case_2
+    solve( (∃ #r. (LtkReveal( $S ) @ #r))  ∥
+           (∃ #y. (SessionKey( $S, ~I, ~oldK ) @ #y) ∧ #y < #i) )
+      case case_1
+      by contradiction /* from formulas */
+    next
+      case case_2
+      solve( ClientState( $S, ~I, <'cycling', ~k, ~oldK> ) ▶₀ #i )
+        case Client_cycle_1
+        solve( (∃ #r. (LtkReveal( $S ) @ #r))  ∥
+               (∃ #r. (LtkReveal( ~I ) @ #r))  ∥
+               ((∃ #j. (Running( $S, ~I, pk(~oldK) ) @ #j) ∧ #j < #vr.1) ∧
+                (∀ S2 I2 #i2. (Commit( S2, I2, pk(~oldK) ) @ #i2) ⇒ #vr.1 = #i2)) )
+          case case_1
+          by contradiction /* from formulas */
+        next
+          case case_2
+          by contradiction /* from formulas */
+        next
+          case case_3
+          solve( !Pk( $S, pk(x) ) ▶₁ #i )
+            case Register_pk
+            solve( !Ltk( $S, ~ltkS ) ▶₀ #j.1 )
+              case Register_pk
+              solve( !AdminPublic( $S, ~admin, pk(x) ) ▶₁ #j.1 )
+                case Register_Authorized_User
+                solve( OwnsKey( ~I, ~k ) @ #y )
+                  case Client_cycle_1
+                  solve( SessionKey( $S, ~I, ~oldK ) @ #y )
+                    case Client_register_2
+                    solve( OwnsKey( ~I, ~oldK ) @ #y.1 )
+                      case Client_register_1
+                      solve( OwnsKey( ~I, ~oldK ) @ #y.3 )
+                        case Client_register_1
+                        solve( OwnsKey( ~I, ~oldK ) @ #y.2 )
+                          case Client_register_1
+                          solve( !KU( ~k ) @ #vk )
+                            case Reveal_client
+                            by contradiction /* from formulas */
+                          qed
+                        qed
+                      qed
+                    qed
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+next
+  case Client_register_2
+  solve( (∃ #r. (LtkReveal( $S ) @ #r))  ∥
+         (∃ #r. (LtkReveal( ~I ) @ #r))  ∥
+         ((∃ #j. (Running( $S, ~I, pk(~k) ) @ #j) ∧ #j < #i) ∧
+          (∀ S2 I2 #i2. (Commit( S2, I2, pk(~k) ) @ #i2) ⇒ #i = #i2)) )
+    case case_1
+    by contradiction /* from formulas */
+  next
+    case case_2
+    by contradiction /* from formulas */
+  next
+    case case_3
+    solve( ClientState( $S, ~I, <'registering', ~k> ) ▶₀ #i )
+      case Client_register_1
+      solve( !Pk( $S, pk(x) ) ▶₁ #i )
+        case Register_pk
+        solve( !Ltk( $S, ~ltkS ) ▶₀ #j.1 )
+          case Register_pk
+          solve( !AdminPublic( $S, ~admin.1, pk(x) ) ▶₁ #j.1 )
+            case Register_Authorized_User
+            solve( OwnsKey( ~I, ~k ) @ #y )
+              case Client_register_1
+              solve( OwnsKey( ~I, ~k ) @ #y )
+                case Client_register_1
+                solve( !KU( ~k ) @ #vk )
+                  case Reveal_client
+                  by contradiction /* from formulas */
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+qed
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* All wellformedness checks were successful. */
+
+/*
+Generated from:
+Tamarin version 1.10.0
+Maude version 2.7.1
+Git revision: UNKNOWN, branch: UNKNOWN
+Compiled at: 2024-10-30 14:56:23.355649243 UTC
+*/
+
+end
