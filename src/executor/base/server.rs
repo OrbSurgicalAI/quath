@@ -4,15 +4,7 @@ use bitvec::array::BitArray;
 use uuid::Uuid;
 
 use crate::{
-    CheckTokenStatus, ClientDeregister, ClientRegisterInit, ClientRevoke, ClientToken, CycleInit,
-    CycleVerifyStatus, DeregisterStatus, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch,
-    ServerCycle, ServerCycleDriver, ServerCycleOutput, ServerDeregister, ServerDeregisterDriver,
-    ServerDeregisterInput, ServerDeregisterOutput, ServerProtocolError, ServerRegister,
-    ServerRegistryDriver, ServerRegistryInput, ServerRegistryOutput, ServerRevoke,
-    ServerRevokeDriver, ServerRevokeInput, ServerRevokeOutput, ServerToken, ServerTokenDriver,
-    ServerTokenInput, ServerTokenOutput, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput,
-    TokenValidityInterval, TokenVerifyStatus, VerifyRequestIntegrityResponse,
-    token::{Final, Token},
+    token::{Final, Token}, CheckTokenStatus, ClientDeregister, ClientRegisterInit, ClientToken, CycleInit, CycleVerifyStatus, DeregisterStatus, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerCycleDriver, ServerCycleOutput, ServerDeregister, ServerDeregisterDriver, ServerDeregisterInput, ServerDeregisterOutput, ServerProtocolError, ServerRegister, ServerRegistryDriver, ServerRegistryInput, ServerRegistryOutput, ServerToken, ServerTokenDriver, ServerTokenInput, ServerTokenOutput, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput, TokenVerifyStatus, VerifyRequestIntegrityResponse
 };
 
 pub struct ServerExecutor<S, K, H, const N: usize>
@@ -30,7 +22,6 @@ where
     pub check_token: fn(CheckTokenQuery<N>) -> CheckTokenStatus,
     pub cycle_verify: fn(CycleVerifyQuery<S>) -> CycleVerifyStatus<S>,
     pub server_sk: S::Private,
-    pub validity_interval: TokenValidityInterval,
     pub token_lifetime: Duration,
     pub _s: PhantomData<S>,
     pub _k: PhantomData<K>,
@@ -201,7 +192,6 @@ where
     ) -> Result<ServerToken<N, K, S::Signature>, ServerProtocolError> {
         let mut machine = ServerTokenDriver::<S, K, H, N>::new(
             self.server_sk.clone(),
-            self.validity_interval.clone(),
             self.token_lifetime,
         );
         machine.recv(time, Some(ServerTokenInput::ReceiveRequest(request)));
@@ -241,46 +231,14 @@ where
 
         terminated
     }
-    pub fn revoke(
-        &mut self,
-        request: ClientRevoke<S::Signature, N>,
-    ) -> Result<ServerRevoke<S::Signature, N>, ServerProtocolError> {
-        let mut machine = ServerRevokeDriver::<S, K, H, N>::new(self.server_sk.clone());
-        machine.recv(Some(ServerRevokeInput::Request(request)));
-
-        let mut poll = Poll::Pending;
-
-        while poll.is_pending() {
-            if let Some(transmit) = machine.poll_transmit() {
-                match transmit {
-                    ServerRevokeOutput::GetPublicKey(query) => {
-                        machine.recv(Some(ServerRevokeInput::KeyFetchResponse((self
-                            .deregister_public_key_fetch)(
-                            query
-                        ))))
-                    }
-                    ServerRevokeOutput::Revoke(query) => machine.recv(Some(
-                        ServerRevokeInput::RevokeResponse((self.revoke_token)(query)),
-                    )),
-                }
-            }
-
-            poll = machine.poll_result();
-        }
-
-        let Poll::Ready(terminated) = poll else {
-            panic!("While loop invariant broken.");
-        };
-
-        terminated
-    }
+ 
     pub fn verify(
         &mut self,
         time: MsSinceEpoch,
         token: Token<Final>,
     ) -> Result<Token<Final>, ServerProtocolError> {
-        let mut machine = ServerVerifyDriver::<H, N>::new(self.validity_interval.clone());
-        machine.recv(time, Some(ServerVerifyInput::Request(token)));
+        let mut machine = ServerVerifyDriver::<H, N>::new();
+        machine.recv(Some(ServerVerifyInput::Request(token)));
 
         let mut poll = Poll::Pending;
 
@@ -288,7 +246,6 @@ where
             if let Some(transmit) = machine.poll_transmit() {
                 match transmit {
                     ServerVerifyOutput::CheckToken(query) => machine.recv(
-                        time,
                         Some(ServerVerifyInput::TokenResponse((self.check_token)(query))),
                     ),
                 }

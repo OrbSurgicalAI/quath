@@ -5,11 +5,7 @@ use rand::Rng;
 use uuid::Uuid;
 
 use super::{
-    ClientProtocolError, ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm,
-    MsSinceEpoch, PrivateKey, PublicKey, ServerProtocolError, TokenValidityInterval, ViewBytes,
-    mem::B64,
-    opcode::OpCode,
-    token::{Final, Pending, Token},
+    mem::B64, opcode::OpCode, token::{Final, Pending, Token}, ClientProtocolError, ClientRegisterInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, PrivateKey, ProtocolTime, PublicKey, ServerProtocolError, ViewBytes
 };
 
 use super::data::*;
@@ -276,7 +272,7 @@ where
     pub fn client_token_init<F>(
         protocol: u8,
         sub_protocol: u8,
-        current_time: MsSinceEpoch,
+        current_time: ProtocolTime,
         client_pk: &S::Private,
         client_id: Uuid,
         mut modifier: F,
@@ -332,12 +328,11 @@ where
         ClientToken { body, signature }: &ClientToken<S::Signature, K>,
         client_pk: &S::Public,
         server_key: &S::Private,
-        interval: &TokenValidityInterval,
-        current_time: MsSinceEpoch,
+        current_time: ProtocolTime,
         expiry: Duration,
     ) -> ServerTokenResult<HS, K, S::Signature> {
         // The token is out of the interval here.
-        if !interval.check_time_validity(current_time, body.token.timestamp) {
+        if current_time != body.token.timestamp {
             return Err(ServerProtocolError::TokenOutOfInterval);
         }
 
@@ -410,61 +405,7 @@ where
         Ok(new_token)
     }
 
-    pub fn client_revoke_init(
-        token_hash: [u8; HS],
-        target: Uuid,
-        claimaint_id: Uuid,
-        claimaint_pk: &S::Private,
-    ) -> ClientProtocolResult<ClientRevoke<S::Signature, HS>> {
-        let signature = claimaint_pk
-            .sign_bytes(&token_hash as &[u8])
-            .map_err(|_| ClientProtocolError::FailedToSignRevokeRequest)?;
 
-        Ok(ClientRevoke {
-            token_hash: B64(token_hash),
-            target,
-            claimant: claimaint_id,
-            proof: B64(signature),
-        })
-    }
-    pub fn server_revoke(
-        request: &ClientRevoke<S::Signature, HS>,
-        related_pk: &S::Public,
-        server_sk: &S::Private,
-    ) -> ServerProtocolResult<ServerRevoke<S::Signature, HS>> {
-        let combined_hash = H::hash_sequence(&[&request.token_hash.view(), &request.proof.view()]);
-
-        if !related_pk.verify((&*request.token_hash) as &[u8], &request.proof) {
-            return Err(ServerProtocolError::FailedToVerifyRevocationRequest);
-        }
-
-        let signature = server_sk
-            .sign_bytes(&combined_hash)
-            .map_err(|_| ServerProtocolError::FailedToSignResponse)?;
-
-        Ok(ServerRevoke {
-            revoke_hash: B64(combined_hash),
-            proof: B64(signature),
-        })
-    }
-
-    pub fn client_revoke_finish(
-        response: &ServerRevoke<S::Signature, HS>,
-        token_hash: &[u8; HS],
-        proof: &S::Signature,
-        server_pk: &S::Public,
-    ) -> ClientProtocolResult<()> {
-        let combined_hash = H::hash_sequence(&[token_hash, &proof.view()]);
-        if combined_hash != *response.revoke_hash {
-            return Err(ClientProtocolError::FailedToValidateRevocationHash);
-        }
-
-        if !server_pk.verify(&*response.revoke_hash, &*response.proof) {
-            return Err(ClientProtocolError::FailedToAuthenticateRevocationResponse);
-        }
-
-        Ok(())
-    }
 
     pub fn client_deregister_init(
         target: Uuid,
@@ -537,7 +478,7 @@ mod tests {
     use crate::{
         algos::{fips203::MlKem512, fips204::MlDsa44},
         core::crypto::{
-            DsaSystem, MsSinceEpoch, QuantumKitL1, TokenValidityInterval,
+            DsaSystem, MsSinceEpoch, QuantumKitL1,
             token::{Pending, Token},
         },
         specials::{FauxChain, FauxKem},
@@ -589,7 +530,7 @@ mod tests {
         let (req, decapskey) = QuantumKitL1::client_token_init(
             0,
             0,
-            MsSinceEpoch(0),
+            crate::ProtocolTime(0),
             &client_private,
             client_id,
             |_: &mut Token<Pending>| {},
@@ -601,8 +542,7 @@ mod tests {
             &req,
             &new_public,
             &server_private,
-            &TokenValidityInterval::from_seconds(0, 0),
-            MsSinceEpoch(0),
+            crate::ProtocolTime(0),
             Duration::from_secs(3),
         )
         .unwrap();
@@ -629,41 +569,6 @@ mod tests {
             execute_protocol_run().unwrap();
             Ok(())
         });
-        Ok(())
-    }
-
-    #[test]
-    pub fn test_revocation_run() -> anyhow::Result<(), &'static str> {
-        let claimant_id = Uuid::new_v4();
-        let (claim_pk, claim_sk) = FauxChain::generate().unwrap();
-        let (server_pk, server_sk) = FauxChain::generate().unwrap();
-
-        let token_hash: [u8; 32] = rand::rng().random();
-
-        let client_req: crate::ClientRevoke<crate::specials::FauxSignature, 32> =
-            ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_revoke_init(
-                token_hash.clone(),
-                Uuid::new_v4(),
-                claimant_id,
-                &claim_sk,
-            )
-            .unwrap();
-
-        let resp = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::server_revoke(
-            &client_req,
-            &claim_pk,
-            &server_sk,
-        )
-        .unwrap();
-
-        ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_revoke_finish(
-            &resp,
-            &token_hash,
-            &client_req.proof,
-            &server_pk,
-        )
-        .unwrap();
-
         Ok(())
     }
 

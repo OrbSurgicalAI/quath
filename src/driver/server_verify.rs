@@ -3,7 +3,7 @@ use std::{marker::PhantomData, task::Poll};
 use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 
 use crate::{
-    CheckTokenQuery, HashingAlgorithm, MsSinceEpoch, ServerProtocolError, TokenValidityInterval,
+    CheckTokenQuery, HashingAlgorithm, MsSinceEpoch, ServerProtocolError,
     ViewBytes,
     token::{Final, Token},
 };
@@ -23,7 +23,6 @@ where
     H: HashingAlgorithm<N>,
 {
     buffer: GrowableAllocRingBuffer<ServerVerifyOutput<N>>,
-    validity_interval: TokenValidityInterval,
     terminated: bool,
     _h: PhantomData<H>,
 }
@@ -64,23 +63,22 @@ impl<H, const N: usize> ServerVerifyDriver<H, N>
 where
     H: HashingAlgorithm<N>,
 {
-    pub fn new(interval: TokenValidityInterval) -> Self {
+    pub fn new() -> Self {
         Self {
             inner: ServerVerifyDriverInner {
                 buffer: GrowableAllocRingBuffer::default(),
-                validity_interval: interval,
                 terminated: false,
                 _h: PhantomData,
             },
             state: DriverState::Init,
         }
     }
-    pub fn recv(&mut self, time: MsSinceEpoch, packet: Option<ServerVerifyInput>) {
+    pub fn recv(&mut self, packet: Option<ServerVerifyInput>) {
         if self.inner.terminated {
             return;
         }
 
-        match recv_internal(self, packet, time) {
+        match recv_internal(self, packet) {
             Ok(_) => { /* Nothing to do */ }
             Err(e) => {
                 self.inner.terminated = true;
@@ -110,14 +108,13 @@ where
 
 fn recv_internal<H, const N: usize>(
     obj: &mut ServerVerifyDriver<H, N>,
-    packet: Option<ServerVerifyInput>,
-    current_time: MsSinceEpoch,
+    packet: Option<ServerVerifyInput>
 ) -> Result<(), ServerProtocolError>
 where
     H: HashingAlgorithm<N>,
 {
     let state = match &mut obj.state {
-        DriverState::Init => handle_registry_init(&mut obj.inner, packet, current_time)?,
+        DriverState::Init => handle_registry_init(&mut obj.inner, packet)?,
         DriverState::WaitingForRequestVerification(request) => {
             handle_verification(&mut obj.inner, packet, request)?
         }
@@ -134,8 +131,7 @@ where
 
 fn handle_registry_init<H, const N: usize>(
     inner: &mut ServerVerifyDriverInner<H, N>,
-    packet: Option<ServerVerifyInput>,
-    current_time: MsSinceEpoch,
+    packet: Option<ServerVerifyInput>
 ) -> Result<Option<DriverState>, ServerProtocolError>
 where
     H: HashingAlgorithm<N>,
@@ -146,14 +142,6 @@ where
 
     match packet {
         ServerVerifyInput::Request(token) => {
-            // First we will check it is in the time interval.
-            if !inner
-                .validity_interval
-                .check_time_validity(current_time, token.timestamp)
-            {
-                return Err(ServerProtocolError::TokenOutOfInterval);
-            }
-
             // We have received a request, we now broadcast a request to the server.
             inner
                 .buffer
@@ -211,19 +199,18 @@ mod tests {
 
     use crate::{
         CheckTokenQuery, HashingAlgorithm, MsSinceEpoch, ServerProtocolError, ServerVerifyDriver,
-        ServerVerifyInput, ServerVerifyOutput, TokenValidityInterval, ViewBytes,
+        ServerVerifyInput, ServerVerifyOutput, ViewBytes,
         token::{Pending, Token},
     };
 
     #[test]
     fn test_verify_driver_success() {
         let now = 1_000_000;
-        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), MsSinceEpoch(now)).finalize();
+        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), crate::ProtocolTime(now)).finalize();
         let mut driver =
-            ServerVerifyDriver::<Sha3_256, 32>::new(TokenValidityInterval::from_seconds(60, 60));
+            ServerVerifyDriver::<Sha3_256, 32>::new();
 
         driver.recv(
-            MsSinceEpoch(now),
             Some(ServerVerifyInput::Request(token.clone())),
         );
         let output = driver.poll_transmit();
@@ -241,7 +228,6 @@ mod tests {
         }
 
         driver.recv(
-            MsSinceEpoch(now),
             Some(ServerVerifyInput::TokenResponse(
                 super::CheckTokenStatus::Valid,
             )),
@@ -256,18 +242,16 @@ mod tests {
     #[test]
     fn test_verify_driver_token_in_revocation_list() {
         let now = 1_000_000;
-        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), MsSinceEpoch(now)).finalize();
+        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), crate::ProtocolTime(now)).finalize();
         let mut driver =
-            ServerVerifyDriver::<Sha3_256, 32>::new(TokenValidityInterval::from_seconds(60, 60));
+            ServerVerifyDriver::<Sha3_256, 32>::new();
 
         driver.recv(
-            MsSinceEpoch(now),
             Some(ServerVerifyInput::Request(token.clone())),
         );
         driver.poll_transmit(); // consume CheckToken
 
         driver.recv(
-            MsSinceEpoch(now),
             Some(ServerVerifyInput::TokenResponse(
                 super::CheckTokenStatus::Revoked,
             )),
@@ -282,15 +266,14 @@ mod tests {
     #[test]
     fn test_verify_driver_invalid_uuid() {
         let now = 1_000_000;
-        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), MsSinceEpoch(now)).finalize();
+        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), crate::ProtocolTime(now)).finalize();
         let mut driver =
-            ServerVerifyDriver::<Sha3_256, 32>::new(TokenValidityInterval::from_seconds(60, 60));
+            ServerVerifyDriver::<Sha3_256, 32>::new();
 
-        driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
+        driver.recv(Some(ServerVerifyInput::Request(token)));
         driver.poll_transmit();
 
         driver.recv(
-            MsSinceEpoch(now),
             Some(ServerVerifyInput::TokenResponse(
                 super::CheckTokenStatus::InvalidClientUuid,
             )),
@@ -308,15 +291,14 @@ mod tests {
     #[test]
     fn test_verify_driver_token_expired() {
         let now = 1_000_000;
-        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), MsSinceEpoch(now)).finalize();
+        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), crate::ProtocolTime(now)).finalize();
         let mut driver =
-            ServerVerifyDriver::<Sha3_256, 32>::new(TokenValidityInterval::from_seconds(60, 60));
+            ServerVerifyDriver::<Sha3_256, 32>::new();
 
-        driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
+        driver.recv(Some(ServerVerifyInput::Request(token)));
         driver.poll_transmit();
 
         driver.recv(
-            MsSinceEpoch(now),
             Some(ServerVerifyInput::TokenResponse(
                 super::CheckTokenStatus::Expired,
             )),
@@ -334,15 +316,14 @@ mod tests {
     #[test]
     fn test_verify_driver_token_not_in_db() {
         let now = 1_000_000;
-        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), MsSinceEpoch(now)).finalize();
+        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), crate::ProtocolTime(now)).finalize();
         let mut driver =
-            ServerVerifyDriver::<Sha3_256, 32>::new(TokenValidityInterval::from_seconds(60, 60));
+            ServerVerifyDriver::<Sha3_256, 32>::new();
 
-        driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
+        driver.recv(Some(ServerVerifyInput::Request(token)));
         driver.poll_transmit();
 
         driver.recv(
-            MsSinceEpoch(now),
             Some(ServerVerifyInput::TokenResponse(
                 super::CheckTokenStatus::NonExistent,
             )),
@@ -359,15 +340,15 @@ mod tests {
     #[test]
     fn test_verify_driver_permission_failure() {
         let now = 1_000_000;
-        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), MsSinceEpoch(now)).finalize();
+        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), crate::ProtocolTime(now)).finalize();
         let mut driver =
-            ServerVerifyDriver::<Sha3_256, 32>::new(TokenValidityInterval::from_seconds(60, 60));
+            ServerVerifyDriver::<Sha3_256, 32>::new();
 
-        driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
+        driver.recv( Some(ServerVerifyInput::Request(token)));
         driver.poll_transmit();
 
         driver.recv(
-            MsSinceEpoch(now),
+    
             Some(ServerVerifyInput::TokenResponse(
                 super::CheckTokenStatus::Forbidden,
             )),
@@ -385,15 +366,14 @@ mod tests {
     #[test]
     fn test_verify_driver_other_failure() {
         let now = 1_000_000;
-        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), MsSinceEpoch(now)).finalize();
+        let token = Token::<Pending>::new(0, 0, Uuid::new_v4(), crate::ProtocolTime(now)).finalize();
         let mut driver =
-            ServerVerifyDriver::<Sha3_256, 32>::new(TokenValidityInterval::from_seconds(60, 60));
+            ServerVerifyDriver::<Sha3_256, 32>::new();
 
-        driver.recv(MsSinceEpoch(now), Some(ServerVerifyInput::Request(token)));
+        driver.recv(Some(ServerVerifyInput::Request(token)));
         driver.poll_transmit();
 
         driver.recv(
-            MsSinceEpoch(now),
             Some(ServerVerifyInput::TokenResponse(
                 super::CheckTokenStatus::Failure("unexpected".into()),
             )),
@@ -408,64 +388,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_verify_driver_token_out_of_validity_interval() {
-        // Token issued far outside the validity window
-        let token_timestamp = 1_000_000;
-        let current_time = 2_000_000;
-
-        // Validity interval is centered around `current_time`
-        let interval = TokenValidityInterval::from_seconds(60, 60);
-        let token =
-            Token::<Pending>::new(0, 0, Uuid::new_v4(), MsSinceEpoch(token_timestamp)).finalize();
-        let mut driver = ServerVerifyDriver::<Sha3_256, 32>::new(interval);
-
-        // Feed the token with a timestamp that's way out of bounds
-        driver.recv(
-            MsSinceEpoch(current_time),
-            Some(ServerVerifyInput::Request(token)),
-        );
-
-        // It should fail immediately with TokenOutOfInterval error
-        match driver.poll_result() {
-            Poll::Ready(Err(e)) => match e {
-                ServerProtocolError::TokenOutOfInterval => {}
-                _ => panic!("Expected TokenOutOfInterval error"),
-            },
-            _ => panic!("Expected immediate error due to time validity"),
-        }
-
-        // Ensure that no transmission message was queued
-        assert!(driver.poll_transmit().is_none());
-    }
-
-    #[test]
-    fn test_verify_driver_token_too_far_in_future() {
-        // Token timestamp is far in the future
-        let current_time = 1_000_000;
-        let token_timestamp = current_time + 10_000_000;
-
-        let interval = TokenValidityInterval::from_seconds(60, 60);
-        let token =
-            Token::<Pending>::new(0, 0, Uuid::new_v4(), MsSinceEpoch(token_timestamp)).finalize();
-        let mut driver = ServerVerifyDriver::<Sha3_256, 32>::new(interval);
-
-        // Feed the future token
-        driver.recv(
-            MsSinceEpoch(current_time),
-            Some(ServerVerifyInput::Request(token)),
-        );
-
-        // It should fail with TokenOutOfInterval
-        match driver.poll_result() {
-            Poll::Ready(Err(e)) => match e {
-                ServerProtocolError::TokenOutOfInterval => {}
-                _ => panic!("Expected TokenOutOfInterval error"),
-            },
-            _ => panic!("Expected error due to token being too far in the future"),
-        }
-
-        // Ensure no output was queued
-        assert!(driver.poll_transmit().is_none());
-    }
 }

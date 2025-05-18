@@ -4,9 +4,7 @@ use ringbuffer::{GrowableAllocRingBuffer, RingBuffer};
 use uuid::Uuid;
 
 use crate::{
-    ClientToken, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, RevokeTokenQuery,
-    ServerProtocolError, ServerToken, StorageStatus, StoreTokenQuery, TokenRevocationStatus,
-    TokenValidityInterval, VerifyTokenQuery, ViewBytes, protocol::ProtocolKit,
+    protocol::ProtocolKit, ClientToken, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ProtocolTime, RevokeTokenQuery, ServerProtocolError, ServerToken, StorageStatus, StoreTokenQuery, TokenRevocationStatus, VerifyTokenQuery, ViewBytes
 };
 
 use super::ServerPollResult;
@@ -29,7 +27,6 @@ where
 {
     server_sk: S::Private,
     buffer: GrowableAllocRingBuffer<ServerTokenOutput<N>>,
-    validity_interval: TokenValidityInterval,
     token_lifetime: Duration,
     terminated: bool,
     _h: PhantomData<H>,
@@ -64,6 +61,7 @@ where
     Success {
         client_id: Uuid,
         current_public: S::Public,
+        protocol_time: ProtocolTime
     },
     CycleNeeded,
     Duplicate,
@@ -96,14 +94,12 @@ where
 {
     pub fn new(
         server_sk: S::Private,
-        interval: TokenValidityInterval,
         token_lifetime: Duration,
     ) -> Self {
         Self {
             inner: ServerTokenDriverInner {
                 server_sk,
                 buffer: GrowableAllocRingBuffer::default(),
-                validity_interval: interval,
                 token_lifetime,
                 terminated: false,
                 _h: PhantomData,
@@ -248,14 +244,14 @@ where
             TokenVerifyStatus::Success {
                 client_id,
                 current_public,
+                protocol_time
             } => {
                 // Perform the actual token verification.
                 let (response, server_token) = ProtocolKit::<S, K, H, HS>::server_token(
                     init_msg,
                     &current_public,
                     &inner.server_sk,
-                    &inner.validity_interval,
-                    current_time,
+                    protocol_time,
                     inner.token_lifetime,
                 )?;
 
@@ -346,11 +342,7 @@ mod tests {
     use sha3::Sha3_256;
 
     use crate::{
-        DsaSystem, HashingAlgorithm, StoreTokenQuery, TokenValidityInterval, VerifyTokenQuery,
-        ViewBytes,
-        protocol::ProtocolKit,
-        specials::{FauxChain, FauxKem},
-        testutil::BasicSetupDetails,
+        protocol::ProtocolKit, specials::{FauxChain, FauxKem}, testutil::BasicSetupDetails, DsaSystem, HashingAlgorithm, ProtocolTime, StoreTokenQuery, VerifyTokenQuery, ViewBytes
     };
 
     use super::{ServerTokenDriver, ServerTokenOutput};
@@ -361,7 +353,6 @@ mod tests {
 
         let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
             setup.server_sk.clone(),
-            TokenValidityInterval::new(Duration::from_secs(20), Duration::from_secs(20)),
             Duration::from_secs(60),
         );
 
@@ -371,7 +362,7 @@ mod tests {
         let (req, dk) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            crate::MsSinceEpoch(0),
+            crate::ProtocolTime(0),
             &client_sk,
             setup.client_id,
             |_| {},
@@ -400,6 +391,7 @@ mod tests {
                 super::TokenVerifyStatus::Success {
                     client_id: setup.client_id,
                     current_public: client_pk.clone(),
+                    protocol_time: ProtocolTime(0)
                 },
             )),
         );
@@ -450,7 +442,6 @@ mod tests {
 
         let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
             setup.server_sk.clone(),
-            TokenValidityInterval::new(Duration::from_secs(20), Duration::from_secs(20)),
             Duration::from_secs(60),
         );
 
@@ -458,7 +449,7 @@ mod tests {
         let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            MsSinceEpoch(0),
+            ProtocolTime(0),
             &client_sk,
             setup.client_id,
             |_| {},
@@ -500,7 +491,6 @@ mod tests {
 
         let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
             setup.server_sk.clone(),
-            TokenValidityInterval::new(Duration::from_secs(20), Duration::from_secs(20)),
             Duration::from_secs(60),
         );
 
@@ -508,7 +498,7 @@ mod tests {
         let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            MsSinceEpoch(0),
+            ProtocolTime(0),
             &client_sk,
             setup.client_id,
             |_| {},
@@ -552,7 +542,6 @@ mod tests {
 
         let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
             setup.server_sk.clone(),
-            TokenValidityInterval::new(Duration::from_secs(20), Duration::from_secs(20)),
             Duration::from_secs(60),
         );
 
@@ -561,7 +550,7 @@ mod tests {
         let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            MsSinceEpoch(0),
+            ProtocolTime(0),
             &sk,
             setup.client_id,
             |_| {},
@@ -597,7 +586,6 @@ mod tests {
 
         let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
             setup.server_sk.clone(),
-            TokenValidityInterval::new(Duration::from_secs(20), Duration::from_secs(20)),
             Duration::from_secs(60),
         );
 
@@ -605,7 +593,7 @@ mod tests {
         let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            MsSinceEpoch(0),
+            ProtocolTime(0),
             &sk,
             setup.client_id,
             |_| {},
@@ -621,6 +609,7 @@ mod tests {
                 TokenVerifyStatus::Success {
                     client_id: setup.client_id,
                     current_public: pk,
+                    protocol_time: ProtocolTime(0)
                 },
             )),
         );
@@ -656,7 +645,6 @@ mod tests {
 
         let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
             setup.server_sk.clone(),
-            TokenValidityInterval::new(Duration::from_secs(20), Duration::from_secs(20)),
             Duration::from_secs(60),
         );
 
@@ -666,7 +654,7 @@ mod tests {
         let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            MsSinceEpoch(0),
+            ProtocolTime(0),
             &sk,
             setup.client_id,
             |_| {},
@@ -722,7 +710,6 @@ mod tests {
 
         let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
             setup.server_sk.clone(),
-            TokenValidityInterval::new(Duration::from_secs(20), Duration::from_secs(20)),
             Duration::from_secs(60),
         );
 
@@ -731,7 +718,7 @@ mod tests {
         let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            MsSinceEpoch(0),
+            ProtocolTime(0),
             &sk,
             setup.client_id,
             |_| {},

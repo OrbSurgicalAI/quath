@@ -4,7 +4,7 @@ use bitvec::{array::BitArray, order::Lsb0};
 use rand::Rng;
 use uuid::Uuid;
 
-use super::{FixedByteRepr, KemAlgorithm, MsSinceEpoch, Parse, ViewBytes};
+use super::{FixedByteRepr, KemAlgorithm, MsSinceEpoch, Parse, ProtocolTime, ViewBytes};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pending;
@@ -19,7 +19,8 @@ pub struct Token<K> {
     pub id: Uuid,
     // The permission bitfield.
     pub permissions: BitArray<[u8; 16], Lsb0>,
-    pub timestamp: MsSinceEpoch,
+    /// The protocol time related to the ID.
+    pub timestamp: ProtocolTime,
     pub body: [u8; 32],
     pub _state: PhantomData<K>,
 }
@@ -61,7 +62,7 @@ impl<'a, K> Parse<'a> for Token<K> {
         let perms: [u8; 16] = value[PERMISSION_FIELD].try_into().unwrap();
 
         let permissions = BitArray::from(perms);
-        let timestamp = MsSinceEpoch(i64::from_le_bytes(
+        let timestamp = ProtocolTime(i64::from_le_bytes(
             value[TIMESTAMP_FIELD].try_into().unwrap(),
         ));
         let body = value[BODY_FIELD].try_into().unwrap();
@@ -79,7 +80,7 @@ impl<'a, K> Parse<'a> for Token<K> {
 }
 
 impl Token<Pending> {
-    pub fn new(protocol: u8, sub_protocol: u8, id: Uuid, time: MsSinceEpoch) -> Self {
+    pub fn new(protocol: u8, sub_protocol: u8, id: Uuid, time: ProtocolTime) -> Self {
         Self {
             protocol,
             sub_protocol,
@@ -132,7 +133,7 @@ mod tests {
     use bitvec::array::BitArray;
     use uuid::Uuid;
 
-    use crate::core::crypto::{MsSinceEpoch, Parse, ViewBytes};
+    use crate::{core::crypto::{MsSinceEpoch, Parse, ViewBytes}, ProtocolTime};
 
     use super::{Pending, Token};
 
@@ -142,7 +143,7 @@ mod tests {
                 id: Uuid::from_u128(u.arbitrary()?),
                 permissions: BitArray::from(<[u8; 16]>::arbitrary(u)?),
                 body: <[u8; 32]>::arbitrary(u)?,
-                timestamp: MsSinceEpoch(i64::arbitrary(u)?),
+                timestamp: ProtocolTime(i64::arbitrary(u)?),
                 sub_protocol: u.arbitrary()?,
                 protocol: u.arbitrary()?,
                 _state: PhantomData,
@@ -152,7 +153,7 @@ mod tests {
 
     #[test]
     pub fn token_modify_permission_bitfield() {
-        let mut token = Token::new(1, 1, Uuid::new_v4(), MsSinceEpoch(3939));
+        let mut token = Token::new(1, 1, Uuid::new_v4(), ProtocolTime(3939));
 
         token.permissions_mut().set(0, true);
         assert!(token.permissions().get(0).unwrap());

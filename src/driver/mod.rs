@@ -1,26 +1,21 @@
 mod client;
 mod client_deregister;
-mod client_revoke;
 mod client_single;
 mod register;
 mod server_cycle;
 mod server_deregister;
 mod server_register;
-mod server_revoke;
 mod server_token;
 mod server_verify;
 
 use std::task::Poll;
-
 pub use client::*;
 pub use client_deregister::*;
-pub use client_revoke::*;
 pub(crate) use client_single::*;
 pub use register::*;
 pub use server_cycle::*;
 pub use server_deregister::*;
 pub use server_register::*;
-pub use server_revoke::*;
 pub use server_token::*;
 pub use server_verify::*;
 
