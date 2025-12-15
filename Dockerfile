@@ -1,4 +1,4 @@
-FROM rust:1.86.0-slim
+FROM rust:1.92.0-slim
 
 # Prevent any error messages about there not being a terminal
 ENV DEBIAN_FRONTEND noninteractive
@@ -26,7 +26,8 @@ RUN apt-get update -qq && \
     # Purge anything that has become useless
     apt-get autoremove -qq --purge && \
     # And finally do cleanup
-    apt-get clean -qq && rm -fr /var/lib/apt/* /var/cache/apt/*
+    apt-get clean -qq && rm -fr /var/lib/apt/* /var/cache/apt/* \
+    rustup update
 
 # Enable arm v6 in Rust
 RUN rustup target add arm-unknown-linux-gnueabihf

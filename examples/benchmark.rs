@@ -32,22 +32,46 @@ pub struct ServerContext {
 }
 
 impl ServerContext {
-    pub fn register(&mut self, client_id: Uuid, admin: &AdminContext) -> Result<ClientContext> {
+    pub fn register(&mut self, client_id: Uuid, admin: &AdminContext, timer: &mut TimingData) -> Result<ClientContext> {
         // Start the client registration.
+        let start_1 = Instant::now();
         let (packet, client_private) =
             Sec1Kit::client_register_init(client_id, admin.admin_id, &admin.admin_private)?;
 
         let client_public: MlDsa44Public = packet.public_key().clone();
+        let end_1 = Instant::now();
+
+        let start_2  = Instant::now();
         // Do the server registration portion.
         let server_registry_resp =
             Sec1Kit::server_register(&packet, &admin.admin_public, &self.server_private)?;
+         // Insert into the registry.
+        self.registry.insert(client_id, client_public.clone());
+
+        let end_2 = Instant::now();
+
+
+        let start_3 = Instant::now();
 
         // Finish registering the client.
         Sec1Kit::client_register_finish(&server_registry_resp, client_id, &self.server_public)?;
 
-        // Insert into the registry.
-        self.registry.insert(client_id, client_public.clone());
 
+        let end_3 = Instant::now();
+
+
+        if !timer.is_client {
+
+            
+            timer.total_time = end_2 - start_2;
+
+            
+        } else {
+            timer.total_time = (end_1 - start_1) + (end_3 - start_3);
+        }
+
+
+       
         Ok(ClientContext {
             client_id,
             client_private,
@@ -138,8 +162,11 @@ impl ClientContext {
         Ok(())
     }
 
-    pub fn get_token(&mut self, server_ctx: &mut ServerContext) -> anyhow::Result<Token<Final>> {
+    pub fn get_token(&mut self, server_ctx: &mut ServerContext, timing: &mut TimingData) -> anyhow::Result<Token<Final>> {
         //
+
+        let start_1 = Instant::now();
+
         let (token_req, dk) = Sec1Kit::client_token_init(
             0,
             0,
@@ -149,6 +176,11 @@ impl ClientContext {
             |_| {},
         )?;
         let client_wip_token = token_req.body.token.0.clone();
+
+
+        let end_1 = Instant::now();
+
+        let start_2 = Instant::now();
 
         let server_response = {
             // SERVER SIDE.
@@ -175,21 +207,49 @@ impl ClientContext {
             server_response
         };
 
+        let end_2 = Instant::now();
+
+        let start_3 = Instant::now();
+
         let c =
             Sec1Kit::client_token_finish(&server_response, &client_wip_token, &dk, &server_ctx.server_public)?;
+        
+        let end_3  = Instant::now();
+
+        if timing.is_client {
+            timing.total_time = (end_1 - start_1) + (end_3 - start_3);
+        } else {
+            timing.total_time = end_2 - start_2;
+        }
+
+
+        
         Ok(c)
     }
 
-    pub fn verify_token(&self, token: &Token<Final>, server_ctx: &mut ServerContext) -> anyhow::Result<()> {
+    pub fn verify_token(&self, token: &Token<Final>, server_ctx: &mut ServerContext, timer: &mut TimingData) -> anyhow::Result<()> {
+        let start = Instant::now();
         let hash = Sha3_256::hash(&token.view());
         let time = server_ctx.token_db.get(&hash).ok_or_else(|| anyhow!("Failed to lookup hash."))?;
 
-        if *time > Utc::now() {
+
+        assert!(!timer.is_client, "Cannot time client verification.");
+
+
+
+        let result = if *time > Utc::now() {
             Ok(())
         } else {
             server_ctx.token_db.remove(&hash);
             Err(anyhow!("Token expired."))
-        }
+        };
+
+        let end = Instant::now();
+
+        timer.total_time = end - start;
+
+        result
+
     }
 }
 
@@ -219,7 +279,10 @@ impl TimingData {
 #[derive(Debug)]
 pub enum Test {
     None,
-    Cycle
+    Cycle,
+    Register,
+    Verify,
+    Stamp
 }
 
 pub fn main() -> anyhow::Result<()> {
@@ -245,6 +308,12 @@ pub fn main() -> anyhow::Result<()> {
 
     if arguments[2].eq_ignore_ascii_case("cycle") {
         test = Test::Cycle;
+    } else if arguments[2].eq_ignore_ascii_case("stamp") {
+        test = Test::Stamp;  
+    } else if arguments[2].eq_ignore_ascii_case("register") {
+        test = Test::Register;
+    } else if arguments[2].eq_ignore_ascii_case("verify") {
+        test = Test::Verify;
     } else {
         println!("Not a valid test.");
         return Ok(());
@@ -278,9 +347,10 @@ pub fn main() -> anyhow::Result<()> {
         token_db: HashMap::default()
     };
 
-    let mut client = server_ctx.register(client_id, &admin_ctx)?;
+    let mut client = server_ctx.register(client_id, &admin_ctx, &mut TimingData::time_client())?;
     let mut timings = vec![];
-
+    
+    let mut token = None;
     for _ in 0..rounds {
         let mut timing = if is_client {
             TimingData::time_client()
@@ -288,6 +358,22 @@ pub fn main() -> anyhow::Result<()> {
             TimingData::time_server()
         };
         match test {
+            Test::Register => {
+                server_ctx.registry.clear();
+                client = server_ctx.register(client_id, &admin_ctx, &mut timing)?;
+            },
+            Test::Stamp => {
+                client.get_token(&mut server_ctx, &mut timing)?;
+            }
+            Test::Verify => {
+                if token.is_none() {
+                    token = Some(client.get_token(&mut server_ctx, &mut TimingData::time_client())?);
+                }
+
+                client.verify_token(token.as_ref().unwrap(), &mut server_ctx, &mut timing)?;
+                
+
+            }
             Test::Cycle => client.cycle(&mut server_ctx, &mut timing)?,
             Test::None => panic!("Invalid test.")
         }
