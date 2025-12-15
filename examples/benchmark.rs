@@ -255,7 +255,7 @@ impl ClientContext {
 
 
 
-
+#[derive(Clone)]
 pub struct TimingData {
     is_client: bool,
     total_time: Duration    
@@ -276,7 +276,7 @@ impl TimingData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Test {
     None,
     Cycle,
@@ -371,7 +371,7 @@ pub fn main() -> anyhow::Result<()> {
                 }
 
                 client.verify_token(token.as_ref().unwrap(), &mut server_ctx, &mut timing)?;
-                
+
 
             }
             Test::Cycle => client.cycle(&mut server_ctx, &mut timing)?,
@@ -383,8 +383,15 @@ pub fn main() -> anyhow::Result<()> {
 
     let length = timings.len();
     
-    let average = timings.into_iter().map(|f| f.total_time).fold(Duration::ZERO, std::ops::Add::add).as_secs_f64() / length as f64;
+    let average = timings.clone().into_iter().map(|f| f.total_time).fold(Duration::ZERO, std::ops::Add::add).as_secs_f64() / length as f64;
     
+    let time_min = timings.iter().map(|f| f.total_time).min().unwrap();
+    let time_max = timings.iter().map(|f| f.total_time).max().unwrap();
+
+
+    timings.sort_by_key(|f| f.total_time);
+
+    let median = timings[timings.len() / 2].total_time;
     
 
     print!("Mode:\t\t\t");
@@ -393,10 +400,20 @@ pub fn main() -> anyhow::Result<()> {
     } else {
         println!("SERVER");
     }
+
+    let f_list = timings.iter().map(|f| f.total_time.as_secs_f64()).collect::<Vec<_>>();
+    let median = statistical::median(&f_list);
+    let stdev = statistical::standard_deviation(&f_list, None);
+
+
     println!("Test:\t\t\t{:?}", test);
     println!("Total Runs:\t\t{length}");
     println!("Average Time (ms):\t{:.4}ms", average * 1000.);
-
+    println!("Min Time (ms):\t\t{:.4}ms", time_min.as_secs_f64() * 1000.);
+    println!("Max Time (ms):\t\t{:.4}ms", time_max.as_secs_f64() * 1000.);
+    println!("Std. Dev. (ms):\t\t{:.4}ms", stdev * 1000.);
+    println!("Median (ms):\t\t{:.4}ms", median * 1000.);
+    // println!()
     // println!("Timing: {:.2}ms", average * 1000.);
 
     // let token = client.get_token(&mut server_ctx)?;
