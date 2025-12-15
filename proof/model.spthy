@@ -459,14 +459,35 @@ lemma Exists_register_trace:
         & not(Ex #r. LtkReveal(S) @ r)
     "
 
-lemma Exists_cycle_trace:
-    exists-trace
-    "
-    Ex S I k1 k2 #i.
-        SessionKeyRhangeover(S, I, k1, k2) @ #i
-        &  not (Ex #r. LtkReveal(S) @ r)
+lemma Exists_up_to_server_trace:
+  exists-trace
+  "
+  Ex S I k_new k_old admin_pk #j #i.
+      NewClientRegistry(S, I, k_old, admin_pk) @ #j
+        & #j < #i
+        & AnswerCycleRequest(S, I, k_new, k_old) @ #i
+        & not (Ex #r. LtkReveal(S) @ r)
+         
+  "
+
+lemma Exists_full_cycle:
+  exists-trace
+  "
+  Ex S I sk_new pk_old admin_pk #reg #cyc #sess.
+      NewClientRegistry(S, I, pk_old, admin_pk) @ #reg
+    & #reg < #cyc
+    & #cyc < #sess
+    & AnswerCycleRequest(S, I, pk(sk_new), pk_old) @ #cyc
+    & SessionKey(S, I, sk_new) @ #sess
+    & not (Ex #r. LtkReveal(S) @ #r)
+  "
+
+    // "
+    // Ex S I k1 k2 #i.
+    //     SessionKeyRhangeover(S, I, k1, k2) @ #i
+    //     // &  not (Ex #r. LtkReveal(S) @ r)
     
-    "
+    // "
 
 
 // LEMMA: This lemma establishes that a session key is safe as long
