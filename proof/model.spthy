@@ -16,6 +16,7 @@ equations:
     kemdecaps(g, kemencaps(g, ss, kempk(g, sk)), sk) = ss
 
 
+functions: cid/1, csk/1
 
 /* RESTRICTIONS */
 // Most of these are taken directly from the Tamarin
@@ -28,6 +29,8 @@ restriction unique:
     "All x #i #j. UniqueFact(x) @#i & UniqueFact(x) @#j ==> #i = #j"
 
 
+restriction ClientStateShape:
+    "All I #i. Identity(I) @ #i ==> (Ex x. I = cid(x))"
 
 
 /* Secure Channel Rules */
@@ -73,19 +76,19 @@ rule Register_Authorized_User:
 /// RULE: New time. This creates a new time
 /// that is always fresh and hence distinct
 /// from previous times.
-rule NewTime:
-    [ Fr(~t) ] --> [ FreshTime(~t) ]
+// rule NewTime:
+    // [ Fr(~t) ] --> [ FreshTime(~t) ]
 
-rule Reveal_token:
-    [
-        !GlobalToken($S, token)
-    ]
-    --[
-        RevealToken($S, token)
-    ]->
-    [
-        Out(token)
-    ]
+// rule Reveal_token:
+//     [
+//         !GlobalToken($S, token)
+//     ]
+//     --[
+//         RevealToken($S, token)
+//     ]->
+//     [
+//         Out(token)
+//     ]
 
 
 
@@ -104,7 +107,8 @@ rule Reveal_token:
 rule Client_register_1:
         // The actual request to be sent to the server over
         // the network.
-    let request = <'REGISTER', ~I, pk(~k), ~admin>
+    let Id = cid(~I)
+        request = <'REGISTER', Id, pk(~k), ~admin>
         // This is the proof of key ownership.
         k_proof = sign(request, ~k)
         // This is the proof of admin approval.
@@ -123,12 +127,13 @@ rule Client_register_1:
         !AdminPrivate($S, ~admin, ~admin_k)
     ]
     --[
-        OnlyOnce(<'REG_ID', ~I>),
-        OwnsKey(~I, ~k)
+        OnlyOnce(<'REG_ID', Id>),
+        OwnsKey(Id, ~k),
+        Identity(Id)
     ]->
     [
         // We enter the registering state.
-        ClientState($S, ~I, %1, <'registering', ~k>),
+        ClientState($S, Id, <'registering', ~k>),
         Out(<request, k_proof, a_proof>)
     ]
 
@@ -143,9 +148,9 @@ rule Client_register_1:
 // with the byte sequence 'REG_SUCCESS'.
 rule Server_register:
         // Receive the register code, the ID, the public key, and the admin_id.
-    let body = <'REGISTER', ~I, k, ~admin>
+    let body = <'REGISTER', Id, k, ~admin>
         // The response is just the byte string and the hash.
-        resp = <'REG_SUCCESS', h(~I)>
+        resp = <'REG_SUCCESS', h(Id)>
     in
     [
         // Retrieve the long term server key for signing..
@@ -164,23 +169,24 @@ rule Server_register:
         Eq(verify(a_proof, k_proof, admin_pk), true),
 
         // The ID proposed must be unique.
-        UniqueFact(~I),
+        UniqueFact(Id),
 
         // The new key must be unique.
         UniqueFact(k),
 
         // Note that we have registered a new client.
-        NewClientRegistry($S, ~I, k, admin_pk),
+        NewClientRegistry($S, Id, k, admin_pk),
 
-        ServerSessionKey($S, ~I, k),
-        Running($S, ~I, k, %1)
+        ServerSessionKey($S, Id, k),
+        Running($S, Id, k),
+        Identity(Id)
     ]->
     [
         // Record the client state as in initialization.
-        SClientRecord($S, ~I, k, %1, 'init'),
+        SClientRecord($S, Id, k, 'init'),
         
 
-        // Send the response over the network.
+        // Send the response obver the network.
         Out(<resp, sign(resp, ~ltkS)>)
     ]
 
@@ -188,10 +194,10 @@ rule Server_register:
 // RULE: Finishes the registration process frm the client's end.
 rule Client_register_2:
     // This is the format of the server's response.
-    let resp = <'REG_SUCCESS', h(~I)>
+    let resp = <'REG_SUCCESS', h(Id)>
     in [
         // To proceed we must be in the registering state.
-        ClientState($S, ~I, %local, <'registering', ~k>),
+        ClientState($S, Id, <'registering', ~k>),
 
         // Fetch the server public key to verify the signature.
         !Pk($S, pkS),
@@ -205,55 +211,56 @@ rule Client_register_2:
 
         // Make a note in the trace that we have established
         // a session key.
-        SessionKey($S, ~I, ~k),
+        SessionKey($S, Id, ~k),
 
-        Registered($S, ~I, ~k),
+        Registered($S, Id, ~k),
 
-        Cycle(~I, %1, ~k),
-        Commit($S, ~I, pk(~k), %1)
+        Identity(Id),
+
+        Cycle(Id, %1, ~k),
+        Commit($S, Id, pk(~k))
     ]->
     [
-        Cycle(~I, %1, ~k),
-        !ClientKey(~I, ~k),
+        Cycle(Id, %1, ~k),
+        !ClientKey(Id, ~k),
         // We are now registered.
-        ClientState($S, ~I, %local, <'registered', ~k>)
+        ClientState($S, Id, <'registered', ~k>)
     ]
 
 
 
 rule Client_cycle_1:
     // Performs a key cycle.
-    let n = %local %+ %1
-        total = <'CYCLE', ~I, pk(~k2), n>
+    let total = <'CYCLE', Id, pk(~k2)>
         n_proof = sign(total, ~k2)
         o_proof = sign(n_proof, ~oldK)
 
     in
     [
         Fr(~k2), // Generate a new private key.
-        ClientState($S, ~I, %local, <'registered', ~oldK>),
+        ClientState($S, Id, <'registered', ~oldK>),
         !Pk($S, pkS), // Get the server PK for encrypted sending.
     ]
     --[
-        StartedCycle($S, ~I, ~oldK),
-        OwnsKey(~I, ~k2),
-        
+        StartedCycle($S, Id, ~oldK),
+        OwnsKey(Id, ~k2),
+        Identity(Id)
     ]->
     [
         // Store the cycling information.
-        ClientState($S, ~I, %local, <'cycling', ~k2, ~oldK, n>),
+        ClientState($S, Id, <'cycling', ~k2, ~oldK>),
         // Send the message to the server.
         Out(<total, n_proof, o_proof>)
     ]
 
 rule Serv_cycle_1:
     // Performs the server's end of the cycle.
-    let message = <'CYCLE', ~I, k, n>
-        confirm = <'CYCLE_OK', h(<~I, k, n>)>
+    let message = <'CYCLE', Id, k>
+        confirm = <'CYCLE_OK', h(<Id, k>)>
     in [
         // Retrieve the long term server key for decryption.
         !Ltk($S, ~ltkS),
-        SClientRecord($S, ~I, current_pk, %client_time, 'init'),
+        SClientRecord($S, Id, current_pk, 'init'),
         In(<message, n_proof, o_proof>),// <I, k, sig>
         
     ]
@@ -261,34 +268,31 @@ rule Serv_cycle_1:
         // Verify the new key was signed by the old key.
         Eq(verify(n_proof, message, k), true),
         Eq(verify(o_proof, n_proof, current_pk), true),
-
-        Eq(n, %client_time %+ %1),
-
         // Answer the cycle request.
-        AnswerCycleRequest($S, ~I, k, current_pk),
+        AnswerCycleRequest($S, Id, k, current_pk),
+
+        Identity(Id),
 
         // Invalidate the old key.
         InvalidKey(current_pk),
 
-        CycleOccured($S, ~I),
-        Running($S, ~I, k, n),
-
-        ServerSessionKey($S, ~I, k),
-        InvalidateServerSessionKey($S, ~I, current_pk)
+        ServerSessionKey($S, Id, k),
+        InvalidateServerSessionKey($S, Id, current_pk)
 
     ]->
     [
-        SClientRecord($S, ~I, k, n, 'init'),
+        SClientRecord($S, Id, k, 'init'),
         
         Out(<confirm, sign(confirm, ~ltkS)>)
     ]
 
 rule Deregister_with_server:
     [
-        SClientRecord($S, ~I, k, %time, state)
+        SClientRecord($S, Id, k, state)
     ]
     --[
-        Deregistered($S, ~I)
+        Deregistered($S, Id),
+        Identity(Id)
     ]->
     [
 
@@ -296,17 +300,15 @@ rule Deregister_with_server:
 
 rule Client_cycle_2:
     // Handles the server cycle response.
-    
-    let n = %count %+ %1
-        cnfrm = <'CYCLE_OK', h(<~I, pk(~k), n>)>
+    let cnfrm = <'CYCLE_OK', h(<Id, pk(~k)>)>
     in
     [
         // load the state.
         // Client_cycle_1($S, I, ~k, oldK),
-        ClientState($S, ~I, %local, <'cycling', ~k, ~oldK, n>),
+        ClientState($S, Id, <'cycling', ~k, ~oldK>),
         !Pk($S, pkS),
 
-        Cycle(~I, %count, ~oldK),
+        Cycle(Id, %count, ~oldK),
        
         // Receive the hash of the new key.
         In(<cnfrm, sig>)
@@ -316,306 +318,171 @@ rule Client_cycle_2:
         // SessionKeyR(S, I, k),
         Eq(verify(sig, cnfrm, pkS), true),
         // Just to keep track of the change.
-        SessionKeyRhangeover($S, ~I, ~k, ~oldK),
+        SessionKeyRhangeover($S, Id, ~k, ~oldK),
 
-        Commit($S, ~I, pk(~k), n),
+        Identity(Id),
+
         // Establish the new key.
-        SessionKey($S, ~I, ~k),
-        // Cycle(~I, n, ~k),
-        InvalidateKey(~I, ~oldK),
+        SessionKey($S, Id, ~k),
+        Cycle(Id, %count %+ %1, ~k),
+        InvalidateKey(Id, ~oldK),
         // OnlyOnce(<'CLY_CYCLE_LIM', ~I>)
        
     ]->
     [
-        // Registered: ClientState($S, ~I, %local, <'registered', ~oldK>),
-        // Cycle(~I, n, ~k),
-        !ClientKey(~I, ~k),
-        ClientState($S, ~I, n, <'registered', ~k>),
+        Cycle(Id, %count %+ %1, ~k),
+        !ClientKey(Id, ~k),
+        ClientState($S, Id, <'registered', ~k>),
     ]
 
-rule Client_tok_init:
+// rule Client_tok_init:
     
-    let token = <$p1, $p2, ~I, %local, $perms, ~payload>
-        // Compute the KEM public key to send over the wire.
-        ek = kempk($G, ~dk)
-        resp = <'STAMP', token, ek>
-    in [
-        Fr(~time), // generate timestmap
-        Fr(~payload), // payload
-        Fr(~dk), // Generate the secret KEM key.
-        // The ready state will either be 'registered' or 'cycled'.
-        ClientState($S, ~I, %local, <ready_state, ~k>),
+//     let token = <$p1, $p2, ~I, ~time, $perms, ~payload>
+//         // Compute the KEM public key to send over the wire.
+//         ek = kempk($G, ~dk)
+//         resp = <'STAMP', token, ek>
+//     in [
+//         Fr(~time), // generate timestmap
+//         Fr(~payload), // payload
+//         Fr(~dk), // Generate the secret KEM key.
+//         // The ready state will either be 'registered' or 'cycled'.
+//         ClientState($S, ~I, <ready_state, ~k>),
         
-        !Pk($S, pkS)
-    ]
-    --[
+//         !Pk($S, pkS)
+//     ]
+//     --[
   
-        MadeTokenRequest($S, ~I, token),
-    ]->
-    [
-        // FreshTime(~time),
-        ClientState($S, ~I, %local, <'tok_wait', token, ~k, ~dk>),
-        Out(<resp, sign(resp, ~k)>)
-    ]
+//         MadeTokenRequest($S, ~I, token),
+//     ]->
+//     [
+//         FreshTime(~time),
+//         ClientState($S, ~I, <'tok_wait', token, ~k, ~dk>),
+//         Out(<resp, sign(resp, ~k)>)
+//     ]
 
-rule Server_tok:
+// rule Server_tok:
     
-    let token = <$p1, $p2, ~I, %client_time, $perms, ~payload>
-        new_token = <$p1, $p2, ~I, %client_time, $perms, ~ss>
+//     let token = <$p1, $p2, ~I, ~time, $perms, ~payload>
+//         new_token = <$p1, $p2, ~I, ~time, $perms, ~ss>
         
-        // Calculate the KEM ciphettext.
-        ct = kemencaps($G, ~ss, ek)
+//         // Calculate the KEM ciphettext.
+//         ct = kemencaps($G, ~ss, ek)
 
 
-        approval = h(<new_token, token>)
-        package = <'STAMPED', approval, ct>
-        primary = <'STAMP', token, ek>
-    in [
+//         approval = h(<new_token, token>)
+//         package = <'STAMPED', approval, ct>
+//         primary = <'STAMP', token, ek>
+//     in [
 
-        SClientRecord($S, ~I, k, %client_time, validstate),
-        !Ltk($S, ~ltkS),
-        Fr(~newpayload),
-        Fr(~ss),
-        // FreshTime(~time),
-        In(<primary, sig>)
-    ]
-    --[
-        // verify the signatrue checks out.
-        Eq(verify(sig, primary, k), true),
-        TokenApproved($S, ~I, new_token, token),
-        TokenRunning($S, ~I, new_token)
-    ]->
-    [
-        ValidToken($S, h(new_token), 'active'),
+//         SClientRecord($S, ~I, k, 'init'),
+//         !Ltk($S, ~ltkS),
+//         Fr(~newpayload),
+//         Fr(~ss),
+//         FreshTime(~time),
+//         In(<primary, sig>)
+//     ]
+//     --[
+//         // verify the signatrue checks out.
+//         Eq(verify(sig, primary, k), true),
+//         TokenApproved($S, ~I, new_token, token),
+//         TokenRunning($S, ~I, new_token)
+//     ]->
+//     [
+//         ValidToken($S, h(new_token), 'active'),
 
-        !GlobalToken($S, new_token),
+//         !GlobalToken($S, new_token),
 
-        // Here we will give knowledge of the stored token hash to the adversary, as
-        // we want to establish that tokens are secure even in the case of a database leak.
-        Out(h(new_token)),
+//         // Here we will give knowledge of the stored token hash to the adversary, as
+//         // we want to establish that tokens are secure even in the case of a database leak.
+//         Out(h(new_token)),
 
-        // FreshTime(~time),
+//         FreshTime(~time),
 
-        SClientRecord($S, ~I, k, %client_time %+ %1, <'ready', h(new_token)>),
-        Out(<package, sign(package, ~ltkS)>)
-    ]
+//         SClientRecord($S, ~I, k, <'ready', h(new_token)>),
+//         Out(<package, sign(package, ~ltkS)>)
+//     ]
 
-rule Client_tok_2:
-    let token = <$p1, $p2, ~I, %local, $perms, ~payload>
-        ss = kemdecaps($G, ct, ~dk)
-        new_token = <$p1, $p2, ~I, %local, $perms, ss>
+// rule Client_tok_2:
+//     let token = <$p1, $p2, ~I, ~time, $perms, ~payload>
+//         ss = kemdecaps($G, ct, ~dk)
+//         new_token = <$p1, $p2, ~I, ~time, $perms, ss>
         
-        body = <'STAMPED', h(<new_token, token>), ct>
-    in
-    [
-        ClientState($S, ~I, %local, <'tok_wait', token, ~k, ~dk>),
-        !Pk($S, pkS),
-        In(<body, sig>)
-    ]
-    --[
-        // Verify this actually came from the server.
-        Eq(verify(sig, body, pkS),true),
-        HasToken($S, ~I, new_token),
-        TokenCommit($S, ~I, new_token)
+//         body = <'STAMPED', h(<new_token, token>), ct>
+//     in
+//     [
+//         ClientState($S, ~I, <'tok_wait', token, ~k, ~dk>),
+//         !Pk($S, pkS),
+//         In(<body, sig>)
+//     ]
+//     --[
+//         // Verify this actually came from the server.
+//         Eq(verify(sig, body, pkS),true),
+//         HasToken($S, ~I, new_token),
+//         TokenCommit($S, ~I, new_token)
 
-    ]->
-    [
-        // Store the new token.
-        ClientState($S, ~I, %local %+ %1, <'ready', new_token, ~k>),
-    ]
+//     ]->
+//     [
+//         // Store the new token.
+//         ClientState($S, ~I, <'ready', new_token, ~k>),
+// //     ]
 
-rule Expire_token:
-    [ ValidToken($S, tok, 'active') ]
-    --[ ExpireToken($S, tok) ]->
-    [ ValidToken($S, tok, 'expired') ]
-
-
-rule Revoke_token:
-    [ ValidToken($S, tok, 'active') ]
-    --[ RevokedToken($S, tok) ]->
-    [ 
-        ValidToken($S, tok, 'revoked')
-     ]
+// rule Expire_token:
+//     [ ValidToken($S, tok, 'active') ]
+//     --[ ExpireToken($S, tok) ]->
+//     [ ValidToken($S, tok, 'expired') ]
 
 
-rule ServerVerify:
-    [
-        ValidToken($S, tokenHash, 'active')
-    ]
-    --[
-        VerifiesToken($S, tokenHash)
-    ]->
-    [
-        ValidToken($S, tokenHash, 'verified')
-    ]
+// rule Revoke_token:
+//     [ ValidToken($S, tok, 'active') ]
+//     --[ RevokedToken($S, tok) ]->
+//     [ 
+//         ValidToken($S, tok, 'revoked')
+//      ]
 
 
+// rule ServerVerify:
+//     [
+//         ValidToken($S, tokenHash, 'active')
+//     ]
+//     --[
+//         VerifiesToken($S, tokenHash)
+//     ]->
+//     [
+//         ValidToken($S, tokenHash, 'verified')
+//     ]
 
-// lemma Exists_verification_trace:
-//     exists-trace
-//     "
-//     Ex S I t #i #j.
-//         HasToken(S, I, t) @ #i
-//         & VerifiesToken(S, h(t)) @ #j
-//         & #i < #j
-//         & not(Ex #r. LtkReveal(S) @ #r)
-//         & not(Ex #r. LtkReveal(I) @ #r)
-//     "
-
-// lemma Exists_verification_trace_post_cycle:
-//     exists-trace
-//     "
-//     Ex S I t #b #i #j.
-//         CycleOccured(S, I) @ #b
-//         & HasToken(S, I, t) @ #i
-//         & VerifiesToken(S, h(t)) @ #j
-//         & #b < #i & #i < #j
-//         & not(Ex #r. LtkReveal(S) @ #r)
-//         & not(Ex #r. LtkReveal(I) @ #r)
-//     "
-
-lemma InjectiveKeyAgreement [reuse]:
+lemma Exists_register_trace:
+    exists-trace
     "
-    All S I k c #i.
-        /* whenever somebody commits to running a session */
-        Commit(S, I, k, c) @ #i
-        /* and the long term keys are not revealed */
-        & not(Ex #r. LtkReveal(S) @ #r)
+    Ex S I k #i.
+        Registered(S, I, k) @ i
+        & not(Ex #r. LtkReveal(S) @ r)
+    "
+
+lemma Exists_cycle_trace:
+    exists-trace
+    "
+    Ex S I k1 k2 #i.
+        SessionKeyRhangeover(S, I, k1, k2) @ #i
+        &  not (Ex #r. LtkReveal(S) @ r)
+    
+    "
+
+
+// LEMMA: This lemma establishes that a session key is safe as long
+// as it is not revealed.
+lemma SecrecyForward [reuse, use_induction]:
+    "
+    All S I k #i.
+        /* A session key is established. */
+        SessionKey(S, I, k) @ #i
+        /* The client was not revealed */
         & not(Ex #r. LtkReveal(I) @ #r)
-        ==> (
-            /* There is somebody running a session with the same parameters */
-            (Ex #j. Running(S, I, k, c) @ #j & #j < #i)
-            /* and there is no other commit on the same parameters */
-            & not(
-                Ex S2 I2 #i2.
-                    Commit(S2, I2, k, c) @ #i2 & not(#i = #i2)
-            )
-        )
+        /* The key was not invalidated */
+        & not(Ex #r. InvalidateKey(I, k) @ #r)
+        /* then the attacker does not have it */
+        ==> not(Ex #j. K(k) @ #j)
     "
-
-// lemma InjectiveTokenAgreement [reuse]:
-//     "
-//     All S I t #i.
-//         /* someone commits to a token */
-//         TokenCommit(S, I, t) @ #i
-//         /* long term keys have not been revealed */
-//         & not(Ex #r. LtkReveal(S) @ #r)
-//         & not(Ex #r. LtkReveal(I) @ #r)
-//         ==> (
-//             /* There is someone running this token */
-//             (Ex #j. TokenRunning(S, I, t) @ #j & #j < #i)
-//             /* nobody else is running this session */
-//             & not(
-//                 Ex S2 I2 #i2.
-//                     Commit(S2, I2, t) @ #i2 & not(#i = #i2)
-//             )
-//         )
-//     "
-
-// lemma Exists_register_trace:
-//     exists-trace
-//     "
-//     Ex S I k #i.
-//         Registered(S, I, k) @ i
-//         & not(Ex #r. LtkReveal(S) @ r)
-//     "
-
-// lemma Exists_cycle_trace:
-//     exists-trace
-//     "
-//     Ex S I k1 k2 #i.
-//         SessionKeyRhangeover(S, I, k1, k2) @ #i
-//         &  not (Ex #r. LtkReveal(S) @ r)
-    
-//     "
-
-
-
-// lemma SessionKeyPreceededByOwnership [reuse]:
-//     "
-//     All S I k #x.
-//         SessionKey(S, I, k) @ #x
-//         ==>
-//         Ex #y. OwnsKey(I, k) @ #y & #y < #x
-//     "
-
-// lemma SessionKeyRel:
-//     "
-//     All S I newK oldK #x.
-//         SessionKeyRhangeover(S, I, newK, oldK) @ #x
-//         ==> Ex #y. SessionKey(S, I, newK) @ #y
-//     "
-
-// lemma CycleOwnsOldKey [reuse]:
-//     "
-//     All S I newK oldK #x.
-//         SessionKeyRhangeover(S, I, newK, oldK) @ #x
-//         & not(Ex #r. LtkReveal(S) @ r)
-//         ==> Ex #y. SessionKey(S, I, oldK) @ #y & #y < #x
-//     "
-
-// lemma CycleOwnsNewKey [reuse]:
-//     "
-//     All S I newK oldK #x.
-//         SessionKeyRhangeover(S, I, newK, oldK) @ #x
-//         & not(Ex #r. LtkReveal(S) @ r)
-//         ==> Ex #y. OwnsKey(I, newK) @ #y & #y < #x
-//     "
-
-// lemma RegisterOwnsKey [reuse]:
-//     "
-//     All S I k #x.
-//         Registered(S, I, k) @ #x
-//         ==> Ex #y. OwnsKey(I, k) @ #y
-//     "
-
-// lemma ServerCycleApproval [reuse,hide_lemma=InjectiveKeyAgreement]:
-//     "
-//     All S I newK oldK #x.
-//         /* If a server approves a cycle request */
-//         AnswerCycleRequest(S, I, pk(newK), pk(oldK)) @ #x
-//         /* and the client & server long term keys were not revealed */
-//         & not(Ex #r. LtkReveal(S) @ #r)
-//         & not(Ex #r. LtkReveal(I) @ #r)
-//         ==> (
-//             /* The client was registered with the server at some point */
-//             (Ex k_o a_o #r. NewClientRegistry(S, I, k_o, a_o) @ #r)
-            
-//             /* The client used a server session key */
-//             & (Ex #r. ServerSessionKey(S, I, pk(oldK)) @ #r & #r < #x)
-//             /* And said key was valid */
-//             & not(Ex #r. InvalidateServerSessionKey(S, I, pk(oldK)) @ #r & #r < #x)
-//             /* and the client owns the key */
-//             & (Ex #y. OwnsKey(I, oldK) @ #y & #y < #x)
-//         )
-//     "
-
-
-
-// lemma NoVerificationPostExpiry [use_induction,reuse]:
-//     "
-//     not(Ex S t #i #j. VerifiesToken(S, h(t)) @ i & ExpireToken(S, h(t)) @ j & #j < #i)
-//     "
-
-// lemma NoVerificationPostRevoke [use_induction,reuse]:
-//     "
-//     not(Ex S t #i #j. VerifiesToken(S, h(t)) @ i & RevokedToken(S, h(t)) @ j & #j < #i)
-//     "
-
-// // LEMMA: This lemma establishes that a session key is safe as long
-// // as it is not revealed.
-// lemma SecrecyForward [reuse]:
-//     "
-//     All S I k #i.
-//         /* A session key is established. */
-//         SessionKey(S, I, k) @ #i
-//         /* The client was not revealed */
-//         & not(Ex #r. LtkReveal(I) @ #r)
-//         /* The key was not invalidated */
-//         & not(Ex #r. InvalidateKey(I, k) @ #r)
-//         /* then the attacker does not have it */
-//         ==> not(Ex #j. K(k) @ j)
-//     "
 
 
 
