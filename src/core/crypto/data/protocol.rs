@@ -113,6 +113,16 @@ where
     pub a_proof: B64<S>,
 }
 
+impl<PK, S> ClientRegisterInit<PK, S>
+where 
+    PK: PublicKey,
+    S: Signature
+{
+    pub fn public_key(&self) -> &PK {
+        &self.body.public_key
+    }
+}
+
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ServerRegister<S, const HASH_SIZE: usize>
 where
