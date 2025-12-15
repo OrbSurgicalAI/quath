@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["sha3", "fips203", "fips204", "fips205", "sha2", "chrono", "serde" ]  # Optional, specify default features if needed
+default = ["sha3", "fips203", "fips204", "fips205", "ecdsa", "ecdh", "sha2", "chrono", "serde" ]  # Optional, specify default features if needed
 
 serde = [ "base64", "dep:serde", "chrono" ]
 
