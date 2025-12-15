@@ -297,7 +297,7 @@ rule Deregister_with_server:
 rule Client_cycle_2:
     // Handles the server cycle response.
     
-    let 
+    let n = %count %+ %1
         cnfrm = <'CYCLE_OK', h(<~I, pk(~k), n>)>
     in
     [
@@ -306,7 +306,7 @@ rule Client_cycle_2:
         ClientState($S, ~I, %local, <'cycling', ~k, ~oldK, n>),
         !Pk($S, pkS),
 
-        // Cycle(~I, %count, ~oldK),
+        Cycle(~I, %count, ~oldK),
        
         // Receive the hash of the new key.
         In(<cnfrm, sig>)
