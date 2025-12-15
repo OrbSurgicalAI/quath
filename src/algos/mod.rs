@@ -13,6 +13,11 @@ pub mod ecdh;
 #[cfg(feature = "ecdsa")]
 pub mod ecdsa;
 
+pub mod curves;
+
+#[cfg(feature="k256")]
+pub mod k256common;
+
 #[cfg(feature = "fips205")]
 pub mod fips205;
 

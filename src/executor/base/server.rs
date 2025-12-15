@@ -4,7 +4,7 @@ use bitvec::array::BitArray;
 use uuid::Uuid;
 
 use crate::{
-    token::{Final, Token}, CheckTokenStatus, ClientDeregister, ClientRegisterInit, ClientToken, CycleInit, CycleVerifyStatus, DeregisterStatus, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerCycleDriver, ServerCycleOutput, ServerDeregister, ServerDeregisterDriver, ServerDeregisterInput, ServerDeregisterOutput, ServerProtocolError, ServerRegister, ServerRegistryDriver, ServerRegistryInput, ServerRegistryOutput, ServerToken, ServerTokenDriver, ServerTokenInput, ServerTokenOutput, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput, TokenVerifyStatus, VerifyRequestIntegrityResponse
+    token::{Final, Token}, CheckTokenStatus, ClientDeregister, ClientRegisterInit, ClientRevoke, ClientToken, CycleInit, CycleVerifyStatus, DeregisterStatus, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerCycleDriver, ServerCycleOutput, ServerDeregister, ServerDeregisterDriver, ServerDeregisterInput, ServerDeregisterOutput, ServerProtocolError, ServerRegister, ServerRegistryDriver, ServerRegistryInput, ServerRegistryOutput, ServerRevoke, ServerRevokeDriver, ServerRevokeInput, ServerRevokeOutput, ServerToken, ServerTokenDriver, ServerTokenInput, ServerTokenOutput, ServerVerifyDriver, ServerVerifyInput, ServerVerifyOutput, TokenVerifyStatus, VerifyRequestIntegrityResponse
 };
 
 pub struct ServerExecutor<S, K, H, const N: usize>
@@ -201,12 +201,6 @@ where
         while poll.is_pending() {
             if let Some(transmit) = machine.poll_transmit() {
                 match transmit {
-                    ServerTokenOutput::Revoke(query) => {
-                        machine.recv(
-                            time,
-                            Some(ServerTokenInput::RevokeResponse((self.revoke_token)(query))),
-                        );
-                    }
                     ServerTokenOutput::StorageRequest(query) => {
                         machine.recv(
                             time,
@@ -232,9 +226,41 @@ where
         terminated
     }
  
+    pub fn revoke(
+        &mut self,
+        request: ClientRevoke<S::Signature, N>,
+    ) -> Result<ServerRevoke<S::Signature, N>, ServerProtocolError> {
+        let mut machine = ServerRevokeDriver::<S, K, H, N>::new(self.server_sk.clone());
+        machine.recv(Some(ServerRevokeInput::Request(request)));
+
+        let mut poll = Poll::Pending;
+
+        while poll.is_pending() {
+            if let Some(transmit) = machine.poll_transmit() {
+                match transmit {
+                    ServerRevokeOutput::GetPublicKey(query) => {
+                        machine.recv(Some(ServerRevokeInput::KeyFetchResponse((self
+                            .deregister_public_key_fetch)(
+                            query
+                        ))))
+                    }
+                    ServerRevokeOutput::Revoke(query) => machine.recv(Some(
+                        ServerRevokeInput::RevokeResponse((self.revoke_token)(query)),
+                    )),
+                }
+            }
+
+            poll = machine.poll_result();
+        }
+
+        let Poll::Ready(terminated) = poll else {
+            panic!("While loop invariant broken.");
+        };
+
+        terminated
+    }
     pub fn verify(
         &mut self,
-        time: MsSinceEpoch,
         token: Token<Final>,
     ) -> Result<Token<Final>, ServerProtocolError> {
         let mut machine = ServerVerifyDriver::<H, N>::new();

@@ -4,7 +4,7 @@ use bitvec::{array::BitArray, order::Lsb0};
 use rand::Rng;
 use uuid::Uuid;
 
-use super::{FixedByteRepr, KemAlgorithm, MsSinceEpoch, Parse, ProtocolTime, ViewBytes};
+use super::{FixedByteRepr, KemAlgorithm, Parse, ProtocolTime, ViewBytes};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pending;
@@ -62,7 +62,7 @@ impl<'a, K> Parse<'a> for Token<K> {
         let perms: [u8; 16] = value[PERMISSION_FIELD].try_into().unwrap();
 
         let permissions = BitArray::from(perms);
-        let timestamp = ProtocolTime(i64::from_le_bytes(
+        let timestamp = ProtocolTime(u64::from_le_bytes(
             value[TIMESTAMP_FIELD].try_into().unwrap(),
         ));
         let body = value[BODY_FIELD].try_into().unwrap();
@@ -133,7 +133,7 @@ mod tests {
     use bitvec::array::BitArray;
     use uuid::Uuid;
 
-    use crate::{core::crypto::{MsSinceEpoch, Parse, ViewBytes}, ProtocolTime};
+    use crate::{core::crypto::{Parse, ViewBytes}, ProtocolTime};
 
     use super::{Pending, Token};
 
@@ -143,7 +143,7 @@ mod tests {
                 id: Uuid::from_u128(u.arbitrary()?),
                 permissions: BitArray::from(<[u8; 16]>::arbitrary(u)?),
                 body: <[u8; 32]>::arbitrary(u)?,
-                timestamp: ProtocolTime(i64::arbitrary(u)?),
+                timestamp: ProtocolTime(u64::arbitrary(u)?),
                 sub_protocol: u.arbitrary()?,
                 protocol: u.arbitrary()?,
                 _state: PhantomData,

@@ -328,12 +328,13 @@ where
         ClientToken { body, signature }: &ClientToken<S::Signature, K>,
         client_pk: &S::Public,
         server_key: &S::Private,
-        current_time: ProtocolTime,
+        current_protocol_time: ProtocolTime,
+        current_real_time: MsSinceEpoch,
         expiry: Duration,
     ) -> ServerTokenResult<HS, K, S::Signature> {
         // The token is out of the interval here.
-        if current_time != body.token.timestamp {
-            return Err(ServerProtocolError::TokenOutOfInterval);
+        if current_protocol_time != body.token.timestamp {
+            return Err(ServerProtocolError::ProtocolTimeMismatch(current_protocol_time.0));
         }
 
         // Verify the client actually sent this request.
@@ -356,7 +357,7 @@ where
             code: OpCode::Stamped,
             cipher_text: B64(cipher_text),
             hash: B64(approval),
-            expiry: MsSinceEpoch(current_time.0 + expiry.as_millis() as i64),
+            expiry: MsSinceEpoch(current_real_time.0 + expiry.as_millis() as i64),
         };
 
         // Sign the response body with the server private key.
@@ -465,23 +466,75 @@ where
 
         Ok(())
     }
+    pub fn client_revoke_init(
+        token_hash: [u8; HS],
+        target: Uuid,
+        claimaint_id: Uuid,
+        claimaint_pk: &S::Private,
+    ) -> ClientProtocolResult<ClientRevoke<S::Signature, HS>> {
+        let signature = claimaint_pk
+            .sign_bytes(&token_hash as &[u8])
+            .map_err(|_| ClientProtocolError::FailedToSignRevokeRequest)?;
+
+        Ok(ClientRevoke {
+            token_hash: B64(token_hash),
+            target,
+            claimant: claimaint_id,
+            proof: B64(signature),
+        })
+    }
+    pub fn server_revoke(
+        request: &ClientRevoke<S::Signature, HS>,
+        related_pk: &S::Public,
+        server_sk: &S::Private,
+    ) -> ServerProtocolResult<ServerRevoke<S::Signature, HS>> {
+        let combined_hash = H::hash_sequence(&[&request.token_hash.view()]);
+
+        if !related_pk.verify((&*request.token_hash) as &[u8], &request.proof) {
+            return Err(ServerProtocolError::FailedToVerifyRevocationRequest);
+        }
+
+        let signature = server_sk
+            .sign_bytes(&combined_hash)
+            .map_err(|_| ServerProtocolError::FailedToSignResponse)?;
+
+        Ok(ServerRevoke {
+            revoke_hash: B64(combined_hash),
+            proof: B64(signature),
+        })
+    }
+
+    pub fn client_revoke_finish(
+        response: &ServerRevoke<S::Signature, HS>,
+        token_hash: &[u8; HS],
+        proof: &S::Signature,
+        server_pk: &S::Public,
+    ) -> ClientProtocolResult<()> {
+        let combined_hash = H::hash_sequence(&[token_hash]);
+        if combined_hash != *response.revoke_hash {
+            return Err(ClientProtocolError::FailedToValidateRevocationHash);
+        }
+
+        if !server_pk.verify(&*response.revoke_hash, &*response.proof) {
+            return Err(ClientProtocolError::FailedToAuthenticateRevocationResponse);
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
-
-    use rand::Rng;
     use sha3::Sha3_256;
     use uuid::Uuid;
 
     use crate::{
         algos::{fips203::MlKem512, fips204::MlDsa44},
         core::crypto::{
-            DsaSystem, MsSinceEpoch, QuantumKitL1,
-            token::{Pending, Token},
+            token::{Pending, Token}, DsaSystem, QuantumKitL1
         },
-        specials::{FauxChain, FauxKem},
+        specials::{FauxChain, FauxKem}, MsSinceEpoch,
     };
 
     use super::ProtocolKit;
@@ -530,7 +583,7 @@ mod tests {
         let (req, decapskey) = QuantumKitL1::client_token_init(
             0,
             0,
-            crate::ProtocolTime(0),
+            crate::ProtocolTime::ZERO,
             &client_private,
             client_id,
             |_: &mut Token<Pending>| {},
@@ -542,7 +595,8 @@ mod tests {
             &req,
             &new_public,
             &server_private,
-            crate::ProtocolTime(0),
+            crate::ProtocolTime::ZERO,
+            MsSinceEpoch(0),
             Duration::from_secs(3),
         )
         .unwrap();

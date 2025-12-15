@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{core::crypto::{
     protocol::ProtocolKit, token::{Final, Pending, Token}, ClientProtocolError, ClientToken, CycleInit, DsaSystem, HashingAlgorithm, KemAlgorithm, MsSinceEpoch, ServerCycle, ServerToken
-}, ProtocolTime};
+}, ProtocolTime, ProtocolTimeMutator, ServerErrorMetadata, ServerErrorResponse, ServerProtocolError};
 
 /// Represents the protocol execution from the client end in a SANS/IO manner.
 ///
@@ -37,12 +37,12 @@ use crate::{core::crypto::{
 ///
 /// let (client_pk, client_sk) = MlDsa44::generate().unwrap();
 /// let (server_pk, server_sk) = MlDsa44::generate().unwrap();
-/// let mut driver = ClientDriver::<MlDsa44, MlKem512, Sha3_256, 32>::new(Uuid::new_v4(), client_sk, ProtocolSpec::new(0, 0), server_pk, ProtocolTime(0));
+/// let mut driver = ClientDriver::<MlDsa44, MlKem512, Sha3_256, 32>::new(Uuid::new_v4(), client_sk, ProtocolSpec::new(0, 0), server_pk, ProtocolTime::ZERO);
 ///
 /// // In a real example this would be driven differently.
 /// for i in 0..5 {
 ///     /* Here you would pass in the inptus */
-///     driver.recv(None).unwrap();
+///     driver.recv(None);
 ///
 ///     while let Some(transmit) = driver.poll_transmit() {
 ///         /* send out the packet */    
@@ -94,6 +94,7 @@ where
         pending_private: S::Private,
         pending_public: S::Public,
     },
+    Errored(Option<ClientProtocolError>),
     Ready,
 }
 
@@ -103,11 +104,10 @@ where
     K: KemAlgorithm,
 {
     ServerPublicChange(S::Public),
+    ServerError(ServerErrorResponse),
     TokenResponseSuccess(ServerToken<HS, K, S::Signature>),
-    TokenResponseFailure,
 
     CycleResponseSuccess(ServerCycle<HS, S::Signature>),
-    CycleResponseFailure,
     NeedsCycle,
 }
 
@@ -192,8 +192,13 @@ where
     pub fn recv(
         &mut self,
         packet: Option<ClientInput<S, K, HS>>,
-    ) -> Result<(), ClientProtocolError> {
-        recv_internal(self, packet).inspect_err(|_| self.state = DriverState::Init)
+    ) {
+        match recv_internal(self, packet) {
+            Ok(()) => { },
+            Err(e) => {
+                self.state = DriverState::Errored(Some(e))
+            }
+        }
     }
     /// This should be polled until it is empty.
     pub fn poll_transmit(&mut self) -> Option<ClientOutput<S, K>> {
@@ -203,7 +208,18 @@ where
     /// Polls the token. This should follow the poll transmit call. If the token
     /// is ready then [Poll::Ready] will be returned, else if we are in process,
     /// a [Poll::Pending] will be returned.
-    pub fn poll_token(&mut self, time: MsSinceEpoch) -> Poll<&Token<Final>> {
+    /// 
+    //
+    pub fn poll_token(&mut self, time: MsSinceEpoch) -> Poll<Result<&Token<Final>, ClientProtocolError>> {
+
+        if let DriverState::Errored(error) = &mut self.state {
+            // Remove the value from the enum to take ownership.
+            let value = error.take().unwrap();
+            // Reset the state machine.
+            self.state = DriverState::Init;
+            return Poll::Ready(Err(value));
+        }
+
         // Check if we actually even have a token.
         let Some(cont_inner) = &self.inner.container else {
             return Poll::Pending;
@@ -217,7 +233,7 @@ where
             return Poll::Pending;
         }
 
-        Poll::Ready(token)
+        Poll::Ready(Ok(token))
     }
 }
 
@@ -235,6 +251,16 @@ where
         return Ok(());
     }
 
+    if let Some(ClientInput::ServerError(error)) = &packet {
+        if let Some(ServerErrorMetadata::Time { time }) = error.metadata {
+            obj.inner.protocol_time = ProtocolTime(time);
+            obj.state = DriverState::Init;
+            return Ok(());
+        }
+        // Else we go to error.
+        return Err(ClientProtocolError::ServerErrorResponse(error.clone()));
+    }
+
     let state = match &obj.state {
         DriverState::Init => handle_client_init_state(&mut obj.inner, &packet)?,
         DriverState::AcquiringToken { token, dk } => {
@@ -248,6 +274,9 @@ where
             pending_private,
             pending_public,
         } => handle_client_cycle_pending(&mut obj.inner, &packet, pending_private, pending_public)?,
+        DriverState::Errored(_) => {
+            None
+        }
     };
 
     if let Some(inner) = state {
@@ -292,6 +321,11 @@ where
         .output_buffer
         .enqueue(ClientOutput::TokenRequest(request));
 
+    // If we make it this far we need to update
+    // the protocol time.
+    driver.protocol_time = ProtocolTimeMutator::mutate(ProtocolTimeMutator::Operation, driver.protocol_time);
+    
+
     // Switch to acquiring token.
     Ok(Some(DriverState::AcquiringToken {
         token: actual_token,
@@ -316,10 +350,6 @@ where
     };
 
     match packet {
-        ClientInput::TokenResponseFailure => {
-            // Return to the initialization state.
-            return Ok(Some(DriverState::Init));
-        }
         ClientInput::TokenResponseSuccess(response) => {
             let dd = ProtocolKit::<S, K, H, HS>::client_token_finish(
                 response,
@@ -402,12 +432,10 @@ where
                 &driver.server_public,
             )?;
             driver.private = pending_private.clone();
+            driver.protocol_time = ProtocolTimeMutator::mutate(ProtocolTimeMutator::Cycle, driver.protocol_time);
             return Ok(Some(DriverState::Init));
         }
-        ClientInput::CycleResponseFailure => {
-            // send us back to origin.
-            return Ok(Some(DriverState::Init));
-        }
+       
         _ => { /* no action :) */ }
     }
     Ok(None)
@@ -425,7 +453,7 @@ mod tests {
         algos::{fips203::MlKem512, fips204::MlDsa44},
         core::crypto::{
             protocol::ProtocolKit, token::{Pending, Token}, DsaSystem, MsSinceEpoch
-        }, ProtocolTime,
+        }, ProtocolTime, ServerErrorResponse, ServerProtocolError,
     };
 
     use super::{ClientDriver, ClientInput, ClientOutput, ProtocolSpec};
@@ -440,11 +468,11 @@ mod tests {
             client_sk.clone(),
             ProtocolSpec::new(1, 0),
             server_pk.clone(),
-            crate::ProtocolTime(0)
+            crate::ProtocolTime::ZERO
         );
 
         // Client begins the token request process
-        driver.recv(None).unwrap();
+        driver.recv(None);
 
         // Pull the outbound request from the buffer
         let ClientOutput::TokenRequest(client_request) = driver.poll_transmit().unwrap() else {
@@ -456,7 +484,8 @@ mod tests {
             &client_request,
             &client_pk,
             &server_sk,
-            crate::ProtocolTime(0),
+            crate::ProtocolTime::ZERO,
+            MsSinceEpoch(0),
             Duration::from_secs(3),
         )
         .unwrap();
@@ -465,16 +494,72 @@ mod tests {
         driver
             .recv(
                 Some(ClientInput::TokenResponseSuccess(response)),
-            )
-            .unwrap();
+            );
 
         // Poll for the token (should now be ready)
         match driver.poll_token(MsSinceEpoch(500)) {
-            Poll::Ready(t) => {
+            Poll::Ready(Ok(t)) => {
                 assert_eq!(*t, server_tok);
             }
-            Poll::Pending => panic!("Token should be ready"),
+            _ => panic!("Token should be ready"),
         }
+    }
+
+    #[test]
+    pub fn test_driver_token_clock_adjust() {
+        let (client_pk, client_sk) = MlDsa44::generate().unwrap();
+        let (server_pk, server_sk) = MlDsa44::generate().unwrap();
+
+        let mut driver = ClientDriver::<MlDsa44, MlKem512, Sha3_256, 32>::new(
+            Uuid::new_v4(),
+            client_sk.clone(),
+            ProtocolSpec::new(1, 0),
+            server_pk.clone(),
+            crate::ProtocolTime::ZERO
+        );
+
+        assert_eq!(driver.inner.protocol_time.0, 0);
+
+        // Client begins the token request process
+        driver.recv(None);
+        
+
+        // Pull the outbound request from the buffer
+        let ClientOutput::TokenRequest(client_request) = driver.poll_transmit().unwrap() else {
+            panic!("Expected token request");
+        };
+
+        
+
+        // Server processes the request and creates a response
+        let error = ProtocolKit::<MlDsa44, MlKem512, Sha3_256, 32>::server_token(
+            &client_request,
+            &client_pk,
+            &server_sk,
+            ProtocolTime(1),
+            MsSinceEpoch(0),
+            Duration::from_secs(3),
+        )
+        .map(|_| "key fail")
+        .unwrap_err();
+
+        
+
+        // Feed the response back into the client
+        driver
+            .recv(
+                Some(ClientInput::ServerError(ServerErrorResponse::from(error))),
+            );
+
+        assert_eq!(driver.inner.protocol_time.0, 1);
+
+        // // Poll for the token (should now be ready)
+        // match driver.poll_token(MsSinceEpoch(500)) {
+        //     Poll::Ready(t) => {
+        //         assert_eq!(*t, server_tok);
+        //     }
+        //     Poll::Pending => panic!("Token should be ready"),
+        // }
     }
 
     #[test]
@@ -497,12 +582,12 @@ mod tests {
             client_sk.clone(),
             ProtocolSpec::new(1, 0),
             server_pk.clone(),
-            ProtocolTime(0)
+            ProtocolTime::ZERO
 
         );
 
         // Step 1: Start token request
-        driver.recv( None).unwrap();
+        driver.recv( None);
 
         // Step 2: Extract token request
         let ClientOutput::TokenRequest(client_request) = driver.poll_transmit().unwrap() else {
@@ -513,19 +598,19 @@ mod tests {
             &client_request,
             &client_pk,
             &server_sk,
-            ProtocolTime(0),
+            ProtocolTime::ZERO,
+            MsSinceEpoch(0),
             Duration::from_secs(3),
         )
         .unwrap();
 
         // Step 3: Inject `NeedsCycle` from server before responding to token
         driver
-            .recv(Some(ClientInput::NeedsCycle))
-            .unwrap();
+            .recv(Some(ClientInput::NeedsCycle));
 
         assert!(driver.poll_transmit().is_none());
 
-        driver.recv(None).unwrap();
+        driver.recv(None);
 
         // Step 4: Client should emit cycle key storage and cycle request
         let store_key = driver.poll_transmit().unwrap();
@@ -549,11 +634,10 @@ mod tests {
         driver
             .recv(
                 Some(ClientInput::CycleResponseSuccess(cycle_response)),
-            )
-            .unwrap();
+            );
 
         // Step 7: Client should now re-enter Init state and request a new token
-        driver.recv(None).unwrap();
+        driver.recv(None);
 
         let ClientOutput::TokenRequest(_) = driver.poll_transmit().unwrap() else {
             panic!("Expected token request after cycle");
@@ -564,7 +648,7 @@ mod tests {
     pub fn test_driver_token_cycle_failure() {
         use crate::{
             algos::{fips203::MlKem512, fips204::MlDsa44},
-            core::crypto::{DsaSystem, MsSinceEpoch},
+            core::crypto::{DsaSystem},
         };
         use sha3::Sha3_256;
         use uuid::Uuid;
@@ -579,12 +663,11 @@ mod tests {
             client_sk.clone(),
             ProtocolSpec::new(1, 0),
             server_pk.clone(),
-            ProtocolTime(0)
+            ProtocolTime::ZERO
         );
 
         // Step 1: Start token request
-        driver.recv(None).unwrap();
-
+        driver.recv(None);
         // Step 2: Extract token request
         let ClientOutput::TokenRequest(_client_request) = driver.poll_transmit().unwrap() else {
             panic!("Expected token request");
@@ -592,10 +675,9 @@ mod tests {
 
         // Step 3: Inject `NeedsCycle` from server before completing token flow
         driver
-            .recv(Some(ClientInput::NeedsCycle))
-            .unwrap();
+            .recv(Some(ClientInput::NeedsCycle));
 
-        driver.recv(None).unwrap();
+        driver.recv(None);
 
         // Step 4: Expect the client to emit key storage and a cycle request
         let store_key = driver.poll_transmit().unwrap();
@@ -610,11 +692,13 @@ mod tests {
 
         // Step 5: Server returns a failure to the cycle request
         driver
-            .recv(Some(ClientInput::CycleResponseFailure))
-            .unwrap();
+            .recv(Some(ClientInput::ServerError(ServerErrorResponse::from(ServerProtocolError::CycleRequired))));
 
         // Step 6: Client should now return to Init and start a new token request again
-        driver.recv(None).unwrap();
+        let _ = driver.poll_token(MsSinceEpoch(0));
+
+        // cause the co
+        driver.recv(None);
 
         let ClientOutput::TokenRequest(_) = driver.poll_transmit().unwrap() else {
             panic!("Expected new token request after cycle failure");
@@ -631,19 +715,18 @@ mod tests {
             client_sk,
             ProtocolSpec::new(1, 0),
             server_pk,
-            ProtocolTime(0)
+            ProtocolTime::ZERO
         );
 
         // Begin the token request process
-        driver.recv(None).unwrap();
+        driver.recv(None);
 
         // Should now be in AcquiringToken; simulate failure
         driver
-            .recv(Some(ClientInput::TokenResponseFailure))
-            .unwrap();
+            .recv(Some(ClientInput::ServerError(ServerErrorResponse::from(ServerProtocolError::CycleRequired))));
 
         // Re-entering recv with None should trigger another TokenRequest
-        driver.recv(None).unwrap();
+        driver.recv(None);
         let output = driver.poll_transmit();
         assert!(matches!(output, Some(ClientOutput::TokenRequest(_))));
     }
@@ -658,15 +741,14 @@ mod tests {
             client_sk,
             ProtocolSpec::new(1, 0),
             server_pk,
-            ProtocolTime(0)
+            ProtocolTime::ZERO
         );
 
         // Simulate NeedsCycle input
         driver
-            .recv( Some(ClientInput::NeedsCycle))
-            .unwrap();
+            .recv( Some(ClientInput::NeedsCycle));
 
-        driver.recv( None).unwrap();
+        driver.recv( None);
 
         println!("BUFfER SIZE: {:?}", driver.inner.output_buffer.len());
 
@@ -683,11 +765,12 @@ mod tests {
 
         // Simulate cycle failure
         driver
-            .recv(Some(ClientInput::CycleResponseFailure))
-            .unwrap();
+            .recv(Some(ClientInput::ServerError(ServerErrorResponse::from(ServerProtocolError::CycleRequired))));
+
+        let _ = driver.poll_token(MsSinceEpoch(0));
 
         // Next call to recv should reinitiate token request
-        driver.recv(None).unwrap();
+        driver.recv(None);
         let output = driver.poll_transmit();
         assert!(matches!(output, Some(ClientOutput::TokenRequest(_))));
     }
@@ -703,7 +786,7 @@ mod tests {
             client_sk,
             ProtocolSpec::new(1, 0),
             original_pk.clone(),
-            ProtocolTime(0)
+            ProtocolTime::ZERO
         );
 
         // Replace server public key mid-flight
@@ -711,8 +794,7 @@ mod tests {
             .recv(
               
                 Some(ClientInput::ServerPublicChange(new_pk.clone())),
-            )
-            .unwrap();
+            );
 
         // Confirm key was updated
         assert_eq!(
@@ -730,18 +812,18 @@ mod tests {
             client_sk.clone(),
             ProtocolSpec::new(1, 0),
             server_pk.clone(),
-            ProtocolTime(0)
+            ProtocolTime::ZERO
         );
 
         // Begin token request
-        driver.recv(None).unwrap();
+        driver.recv(None);
         let ClientOutput::TokenRequest(client_request) = driver.poll_transmit().unwrap() else {
             panic!("Expected TokenRequest");
         };
 
         // At this point, we're in AcquiringToken
         // Feeding `None` should do nothing (stay pending)
-        driver.recv( None).unwrap();
+        driver.recv( None);
 
         // Feed real token response now
         let (response, expected_token) =
@@ -749,7 +831,8 @@ mod tests {
                 &client_request,
                 &client_pk,
                 &server_sk,
-                crate::ProtocolTime(0),
+                crate::ProtocolTime::ZERO,
+                MsSinceEpoch(0),
                 Duration::from_secs(3),
             )
             .unwrap();
@@ -758,12 +841,11 @@ mod tests {
             .recv(
                 
                 Some(ClientInput::TokenResponseSuccess(response)),
-            )
-            .unwrap();
+            );
 
         match driver.poll_token(MsSinceEpoch(100)) {
-            Poll::Ready(token) => assert_eq!(*token, expected_token),
-            Poll::Pending => panic!("Expected token to be ready"),
+            Poll::Ready(Ok(token)) => assert_eq!(*token, expected_token),
+            _ => panic!("Expected token to be ready"),
         }
     }
 
@@ -783,12 +865,12 @@ mod tests {
             client_sk.clone(),
             ProtocolSpec::new(1, 0),
             server_pk.clone(),
-            ProtocolTime(0),
+            ProtocolTime::ZERO,
             permission_encoder,
         
         );
 
-        driver.recv(None).unwrap();
+        driver.recv(None);
         let ClientOutput::TokenRequest(req) = driver.poll_transmit().unwrap() else {
             panic!("Expected TokenRequest");
         };
@@ -797,7 +879,8 @@ mod tests {
             &req,
             &client_pk,
             &server_sk,
-            crate::ProtocolTime(0),
+            crate::ProtocolTime::ZERO,
+            MsSinceEpoch(0),
             Duration::from_secs(3),
         )
         .unwrap();
@@ -806,14 +889,13 @@ mod tests {
             .recv(
         
                 Some(ClientInput::TokenResponseSuccess(response)),
-            )
-            .unwrap();
+            );
 
         match driver.poll_token(MsSinceEpoch(100)) {
-            Poll::Ready(token) => {
+            Poll::Ready(Ok(token)) => {
                 assert!(token.permissions().as_bitslice().get(1).unwrap());
             }
-            Poll::Pending => panic!("Expected transformed token to be ready"),
+            _ => panic!("Expected transformed token to be ready"),
         }
     }
 }

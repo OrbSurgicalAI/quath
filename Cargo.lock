@@ -545,6 +545,8 @@ dependencies = [
  "bincode",
  "bitvec",
  "chrono",
+ "ecdsa",
+ "elliptic-curve",
  "fips203",
  "fips204",
  "fips205",

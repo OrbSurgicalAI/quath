@@ -39,7 +39,6 @@ pub enum ServerTokenOutput<const N: usize> {
     ///
     /// Also check if this is in some revocation list.
     VerificationRequest(VerifyTokenQuery<N>),
-    Revoke(RevokeTokenQuery<N>),
     StorageRequest(StoreTokenQuery<N>),
 }
 
@@ -79,7 +78,6 @@ where
         request: ClientToken<S::Signature, K>,
         token_hash: [u8; N],
     },
-    WaitingForRevocation,
     WaitingForStore(Option<ServerToken<N, K, S::Signature>>),
     Errored(Option<ServerProtocolError>),
     Finished(Option<ServerToken<N, K, S::Signature>>),
@@ -158,7 +156,6 @@ where
             token_hash,
         } => handle_verification(&mut obj.inner, packet, request, current_time, token_hash)?,
         DriverState::WaitingForStore(resp) => handle_storage_wait(&mut obj.inner, packet, resp)?,
-        DriverState::WaitingForRevocation => handle_revocation_wait(&mut obj.inner, packet)?,
         _ => None, // The other states do not have any active behaviour.
     };
 
@@ -232,26 +229,27 @@ where
             TokenVerifyStatus::InRevocationList => Err(ServerProtocolError::TokenInRevocationList),
             TokenVerifyStatus::Other(reason) => Err(ServerProtocolError::Misc(reason)),
             TokenVerifyStatus::Duplicate => {
-                // Enqueues a token revocation request and puts the state machine in a waiting mode.
-                inner
-                    .buffer
-                    .enqueue(ServerTokenOutput::Revoke(RevokeTokenQuery {
-                        client_id: init_msg.body.token.id,
-                        token_hash: *token_hash,
-                    }));
-                Ok(Some(DriverState::WaitingForRevocation))
+                Err(ServerProtocolError::TokenDuplicate)
             }
             TokenVerifyStatus::Success {
                 client_id,
                 current_public,
                 protocol_time
             } => {
+
+                // If we have reached the maximum protocol time we need to cycle.
+                if protocol_time.is_maxed() {
+                    return Err(ServerProtocolError::CycleRequired);
+                }
+
                 // Perform the actual token verification.
                 let (response, server_token) = ProtocolKit::<S, K, H, HS>::server_token(
                     init_msg,
                     &current_public,
                     &inner.server_sk,
                     protocol_time,
+                    MsSinceEpoch(0),
+
                     inner.token_lifetime,
                 )?;
 
@@ -337,12 +335,12 @@ where
 #[cfg(test)]
 mod tests {
     use core::panic;
-    use std::{ops::Deref, task::Poll, time::Duration};
+    use std::{ops::Deref, task::Poll, time::Duration, u64};
 
     use sha3::Sha3_256;
 
     use crate::{
-        protocol::ProtocolKit, specials::{FauxChain, FauxKem}, testutil::BasicSetupDetails, DsaSystem, HashingAlgorithm, ProtocolTime, StoreTokenQuery, VerifyTokenQuery, ViewBytes
+        protocol::ProtocolKit, specials::{FauxChain, FauxKem}, testutil::BasicSetupDetails, DsaSystem, HashingAlgorithm, ProtocolTime, ServerProtocolError, StoreTokenQuery, VerifyTokenQuery, ViewBytes
     };
 
     use super::{ServerTokenDriver, ServerTokenOutput};
@@ -362,7 +360,7 @@ mod tests {
         let (req, dk) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            crate::ProtocolTime(0),
+            crate::ProtocolTime::ZERO,
             &client_sk,
             setup.client_id,
             |_| {},
@@ -391,7 +389,7 @@ mod tests {
                 super::TokenVerifyStatus::Success {
                     client_id: setup.client_id,
                     current_public: client_pk.clone(),
-                    protocol_time: ProtocolTime(0)
+                    protocol_time: ProtocolTime::ZERO
                 },
             )),
         );
@@ -431,13 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn test_server_token_duplicate_triggers_revocation_flow() {
-        use crate::specials::{FauxChain, FauxKem};
-        use crate::testutil::BasicSetupDetails;
-        use crate::{MsSinceEpoch, ServerTokenDriver, ServerTokenInput, TokenVerifyStatus};
-        use sha3::Sha3_256;
-        use std::time::Duration;
-
+    pub fn test_server_clock_fallout() {
         let setup = BasicSetupDetails::<FauxChain>::new();
 
         let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
@@ -445,48 +437,58 @@ mod tests {
             Duration::from_secs(60),
         );
 
-        let (_client_pk, client_sk) = FauxChain::generate().unwrap();
-        let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
+        let (client_pk, client_sk) = FauxChain::generate().unwrap();
+
+        // Form the initial client request.
+        let (req, dk) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            ProtocolTime(0),
+            crate::ProtocolTime::ZERO,
             &client_sk,
             setup.client_id,
             |_| {},
         )
         .unwrap();
 
-        driver.recv(MsSinceEpoch(0), Some(ServerTokenInput::ReceiveRequest(req)));
+        let client_pending_token = req.body.token.deref().clone();
 
-        let _ = driver.poll_transmit().unwrap(); // discard VerificationRequest
-
+        // Make a requst.
         driver.recv(
-            MsSinceEpoch(0),
-            Some(ServerTokenInput::VerifyResponse(
-                TokenVerifyStatus::Duplicate,
+            crate::MsSinceEpoch(0),
+            Some(super::ServerTokenInput::ReceiveRequest(req)),
+        );
+
+        // Check the verification request.
+        let ServerTokenOutput::VerificationRequest(VerifyTokenQuery { .. }) =
+            driver.poll_transmit().unwrap()
+        else {
+            panic!("Expected verification request, got something else.");
+        };
+
+        // driver receive
+        driver.recv(
+            crate::MsSinceEpoch(0),
+            Some(super::ServerTokenInput::VerifyResponse(
+                super::TokenVerifyStatus::Success {
+                    client_id: setup.client_id,
+                    current_public: client_pk.clone(),
+                    protocol_time: ProtocolTime(1)
+                },
             )),
         );
 
-        let Some(crate::ServerTokenOutput::Revoke { .. }) = driver.poll_transmit() else {
-            panic!("Expected revocation to be enqueued");
+        let Poll::Ready(Err(ServerProtocolError::ProtocolTimeMismatch(inner))) = driver.poll_result() else {
+            panic!("Hello");
         };
 
-        // Still waiting for revocation confirmation
-        assert!(matches!(driver.poll_result(), std::task::Poll::Pending));
+        assert_eq!(inner, 1);
+
+        // println!("E: {:?}", e);
+
     }
 
-    #[test]
-    fn test_server_token_revocation_fails() {
-        use crate::specials::{FauxChain, FauxKem};
-        use crate::testutil::BasicSetupDetails;
-        use crate::{
-            MsSinceEpoch, ServerProtocolError, ServerTokenDriver, ServerTokenInput,
-            TokenVerifyStatus,
-        };
-        use sha3::Sha3_256;
-        use std::task::Poll;
-        use std::time::Duration;
-
+     #[test]
+    pub fn test_server_tok_protocol_time_overflow() {
         let setup = BasicSetupDetails::<FauxChain>::new();
 
         let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
@@ -494,38 +496,54 @@ mod tests {
             Duration::from_secs(60),
         );
 
-        let (_client_pk, client_sk) = FauxChain::generate().unwrap();
-        let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
+        let (client_pk, client_sk) = FauxChain::generate().unwrap();
+
+        // Form the initial client request.
+        let (req, dk) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            ProtocolTime(0),
+            crate::ProtocolTime::ZERO,
             &client_sk,
             setup.client_id,
             |_| {},
         )
         .unwrap();
 
-        driver.recv(MsSinceEpoch(0), Some(ServerTokenInput::ReceiveRequest(req)));
-        let _ = driver.poll_transmit(); // VerificationRequest
-
+        // Make a requst.
         driver.recv(
-            MsSinceEpoch(0),
-            Some(ServerTokenInput::VerifyResponse(
-                TokenVerifyStatus::Duplicate,
-            )),
+            crate::MsSinceEpoch(0),
+            Some(super::ServerTokenInput::ReceiveRequest(req)),
         );
-        let _ = driver.poll_transmit(); // Revoke
 
-        driver.recv(
-            MsSinceEpoch(0),
-            Some(ServerTokenInput::RevokeResponse(
-                crate::TokenRevocationStatus::Confirmed,
-            )),
-        );
-        let Poll::Ready(Err(ServerProtocolError::TokenDuplicate)) = driver.poll_result() else {
-            panic!("Expected a duplicate token protocol error");
+        // Check the verification request.
+        let ServerTokenOutput::VerificationRequest(VerifyTokenQuery { .. }) =
+            driver.poll_transmit().unwrap()
+        else {
+            panic!("Expected verification request, got something else.");
         };
+
+        // driver receive
+        driver.recv(
+            crate::MsSinceEpoch(0),
+            Some(super::ServerTokenInput::VerifyResponse(
+                super::TokenVerifyStatus::Success {
+                    client_id: setup.client_id,
+                    current_public: client_pk.clone(),
+                    protocol_time: ProtocolTime(u64::MAX)
+                },
+            )),
+        );
+
+        let Poll::Ready(Err(ServerProtocolError::CycleRequired)) = driver.poll_result() else {
+            panic!("Server should have directed a cycle...");
+        };
+
+        // assert_eq!(inner, 1);
+
+        // println!("E: {:?}", e);
+
     }
+
 
     #[test]
     fn test_server_token_cycle_needed_fails_immediately() {
@@ -550,7 +568,7 @@ mod tests {
         let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            ProtocolTime(0),
+            ProtocolTime::ZERO,
             &sk,
             setup.client_id,
             |_| {},
@@ -593,7 +611,7 @@ mod tests {
         let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
             0,
             0,
-            ProtocolTime(0),
+            ProtocolTime::ZERO,
             &sk,
             setup.client_id,
             |_| {},
@@ -609,7 +627,7 @@ mod tests {
                 TokenVerifyStatus::Success {
                     client_id: setup.client_id,
                     current_public: pk,
-                    protocol_time: ProtocolTime(0)
+                    protocol_time: ProtocolTime::ZERO
                 },
             )),
         );
@@ -630,119 +648,4 @@ mod tests {
         assert_eq!(reason, "db down");
     }
 
-    #[test]
-    fn test_server_token_duplicate_token_revocation_and_confirmation() {
-        use crate::specials::{FauxChain, FauxKem};
-        use crate::testutil::BasicSetupDetails;
-        use crate::{
-            MsSinceEpoch, ServerProtocolError, ServerTokenDriver, ServerTokenInput,
-            ServerTokenOutput, TokenVerifyStatus,
-        };
-        use sha3::Sha3_256;
-        use std::{task::Poll, time::Duration};
-
-        let setup = BasicSetupDetails::<FauxChain>::new();
-
-        let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
-            setup.server_sk.clone(),
-            Duration::from_secs(60),
-        );
-
-        let (_pk, sk) = FauxChain::generate().unwrap();
-
-        // Client creates and sends token
-        let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
-            0,
-            0,
-            ProtocolTime(0),
-            &sk,
-            setup.client_id,
-            |_| {},
-        )
-        .unwrap();
-
-        // Step 1: Receive the token request
-        driver.recv(MsSinceEpoch(0), Some(ServerTokenInput::ReceiveRequest(req)));
-
-        // Step 2: Expect verification request to be emitted
-        let Some(ServerTokenOutput::VerificationRequest { .. }) = driver.poll_transmit() else {
-            panic!("Expected VerificationRequest");
-        };
-
-        // Step 3: Receive duplicate status
-        driver.recv(
-            MsSinceEpoch(0),
-            Some(ServerTokenInput::VerifyResponse(
-                TokenVerifyStatus::Duplicate,
-            )),
-        );
-
-        // Step 4: Revocation should be emitted
-        let Some(ServerTokenOutput::Revoke { .. }) = driver.poll_transmit() else {
-            panic!("Expected Revoke output after duplicate detection");
-        };
-
-        // Step 5: Simulate receiving confirmation
-        driver.recv(
-            MsSinceEpoch(0),
-            Some(ServerTokenInput::RevokeResponse(
-                crate::TokenRevocationStatus::Confirmed,
-            )),
-        );
-
-        // Step 6: The result should now be a final protocol error
-        let Poll::Ready(Err(ServerProtocolError::TokenDuplicate)) = driver.poll_result() else {
-            panic!("Expected TokenDuplicate protocol error");
-        };
-    }
-
-    #[test]
-    fn test_server_token_duplicate_token_revocation_never_confirmed_times_out() {
-        use crate::specials::{FauxChain, FauxKem};
-        use crate::testutil::BasicSetupDetails;
-        use crate::{
-            MsSinceEpoch, ServerTokenDriver, ServerTokenInput, ServerTokenOutput, TokenVerifyStatus,
-        };
-        use sha3::Sha3_256;
-        use std::time::Duration;
-
-        let setup = BasicSetupDetails::<FauxChain>::new();
-
-        let mut driver = ServerTokenDriver::<FauxChain, FauxKem, Sha3_256, 32>::new(
-            setup.server_sk.clone(),
-            Duration::from_secs(60),
-        );
-
-        let (_pk, sk) = FauxChain::generate().unwrap();
-
-        let (req, _) = ProtocolKit::<FauxChain, FauxKem, Sha3_256, 32>::client_token_init(
-            0,
-            0,
-            ProtocolTime(0),
-            &sk,
-            setup.client_id,
-            |_| {},
-        )
-        .unwrap();
-
-        driver.recv(MsSinceEpoch(0), Some(ServerTokenInput::ReceiveRequest(req)));
-
-        let Some(ServerTokenOutput::VerificationRequest { .. }) = driver.poll_transmit() else {
-            panic!("Expected VerificationRequest");
-        };
-
-        driver.recv(
-            MsSinceEpoch(0),
-            Some(ServerTokenInput::VerifyResponse(
-                TokenVerifyStatus::Duplicate,
-            )),
-        );
-
-        let Some(ServerTokenOutput::Revoke { .. }) = driver.poll_transmit() else {
-            panic!("Expected Revoke output");
-        };
-
-        // No confirmation is sent. The state machine should not yield a result yet.
-        assert!(matches!(driver.poll_result(), std::task::Poll::Pending));
-    }
 }

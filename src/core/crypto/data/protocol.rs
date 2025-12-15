@@ -187,13 +187,31 @@ where
 pub struct ServerErrorResponse {
     pub name: &'static str,
     pub error: String,
+    pub metadata: Option<ServerErrorMetadata>
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type"))]
+pub enum ServerErrorMetadata {
+    Time {
+        time: u64
+    }
 }
 
 impl From<ServerProtocolError> for ServerErrorResponse {
     fn from(value: ServerProtocolError) -> Self {
+        if let ServerProtocolError::ProtocolTimeMismatch(inner) = value {
+            return Self {
+                name: value.error_name(),
+                error: value.to_string(),
+                metadata: Some(ServerErrorMetadata::Time { time: inner })
+            }
+        }
         Self {
             name: value.error_name(),
             error: value.to_string(),
+            metadata: None
         }
     }
 }
@@ -256,5 +274,24 @@ impl<const H: usize> ServerCycleBody<H> {
         buffer.push(self.code.to_code());
         buffer.extend_from_slice(self.hash.as_ref());
         buffer
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::ServerProtocolError;
+
+    use super::{ServerErrorMetadata, ServerErrorResponse};
+
+
+    #[test]
+    pub fn test_server_error_response() {
+        let wow = ServerErrorResponse::from(ServerProtocolError::ProtocolTimeMismatch(12));
+        if let Some(ServerErrorMetadata::Time { time }) = wow.metadata {
+            assert_eq!(time, 12);
+        } else {
+            panic!("Failed to properly form a time packet.");
+        }
     }
 }

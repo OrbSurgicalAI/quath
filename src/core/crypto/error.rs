@@ -62,6 +62,8 @@ pub enum ServerProtocolError {
     DeregstrationUnchanged,
     #[error("error in deregisterd")]
     DeregistrationError(String),
+    #[error("The protocol time is wrong.")]
+    ProtocolTimeMismatch(u64)
 }
 impl ServerProtocolError {
     pub fn error_name(&self) -> &'static str {
@@ -95,6 +97,7 @@ impl ServerProtocolError {
             Self::UnauthorizedDeregisterRequest => "UnauthorizedDeregisterRequest",
             Self::DeregstrationUnchanged => "DeregstrationUnchanged",
             Self::DeregistrationError(_) => "DeregistrationError",
+            Self::ProtocolTimeMismatch(_) => "ProtocolTimeMismatch"
         }
     }
 }
